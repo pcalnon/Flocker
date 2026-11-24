@@ -221,3 +221,39 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# Flocker
+# ---------------------------------------------------------------------------
+
+# Temporary files: sessions, scripts and tools write them under this repo's tmp/, never /tmp.
+/tmp/
+
+# Claude Code: the worktrees it creates for isolated sessions, and this host's own settings.
+/.claude/worktrees/
+/.claude/settings.local.json
+
+# Browser-automation logs and page snapshots.
+.playwright-mcp/
+
+# Runtime logs (the folder itself is kept).
+/logs/*
+!/logs/.gitkeep
+
+# Video media and third-party datasets are never committed. GitHub refuses files over 100 MB, and the
+# Pexels and Pixabay licences forbid redistributing the clips. Their provenance and checksums ARE
+# tracked: videos/raw/SOURCES.md and videos/raw/teamtrack_soccer_top/{SHA256SUMS,kaggle-dataset-metadata.json}.
+# Re-fetch the dataset with util/ad-hoc/2026-11-20_fetch_teamtrack_soccer_top.py.
+/videos/**/*.mp4
+/videos/**/*.webm
+/videos/**/*.mov
+/videos/**/*.mkv
+/videos/**/*.avi
+/videos/raw/teamtrack_soccer_top/teamtrack/
+/videos/raw/teamtrack_soccer_top/teamtrack-mot/
+
+# Model weights, downloaded on first use.
+*.pt
+*.pth
+*.onnx
+*.engine

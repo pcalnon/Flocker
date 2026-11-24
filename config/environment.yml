@@ -1,0 +1,59 @@
+# Flocker video-analysis environment: tracking soccer players in top-down video.
+# Created 2026-11-20; verified on an RTX 2080 (driver 580.x, which supports CUDA <= 13.0).
+#
+# Create:   mamba env create -f config/environment.yml
+# Then run the three post-create steps at the end of this file.
+#
+# Every package comes from conda-forge. Why the pins:
+#   cuda-version=12.9   Runs on the 580.x driver without relying on NVIDIA's minor-version
+#                       compatibility (conda-forge's default today is a CUDA 13.4 build).
+#   pytorch=*=cuda*     Without it the solver can silently choose a CPU-only build. It did once,
+#                       to satisfy setuptools>=84: the CUDA 12.9 build of pytorch 2.13.0 needs
+#                       setuptools<82.
+#   opencv<5            ultralytics and supervision are developed against OpenCV 4.x.
+#   ffmpeg=*=gpl*       The GPL build has libx264 and libx265; the default LGPL build has neither.
+name: Flocker
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - cuda-version=12.9
+  - pytorch=*=cuda*
+  - torchvision=*=cuda*
+  - opencv>=4.10,<5
+  - ffmpeg=*=gpl*
+  - numpy
+  - scipy
+  - pandas
+  - scikit-image
+  - scikit-learn
+  - matplotlib
+  - tqdm
+  - ultralytics
+  - supervision
+  - mplsoccer
+  - transformers
+  - umap-learn
+  - sentencepiece
+  - protobuf
+  - six            # kaggle 2.2.5 imports it, but conda-forge's kaggle recipe does not list it
+  - yt-dlp
+  - kaggle
+  - huggingface_hub
+  - gdown
+  - lap
+  - ipykernel
+  - pip
+# Post-create steps (run once, inside the activated environment):
+#
+# 1. roboflow/sports is on no package index. Install the reviewed commit without dependencies
+#    (all of them are listed above; letting pip resolve them would add a second OpenCV from PyPI).
+#    pip checks the archive against the sha256 in the URL fragment:
+#      python -m pip install --no-deps "https://codeload.github.com/roboflow/sports/tar.gz/42c80c06b6b65a7f89455b89fe31cdf4c38ba227#sha256=169c88540f601514e9bbbb78ab31727cab42569f76fe6f6ff36e2494c413b26d"
+#    Never run `pip install sports`: that name is unclaimed on PyPI, so anyone could register it.
+#
+# 2. Stop later installs from changing the CUDA build:
+#      printf '%s\n' 'pytorch=*=cuda*' 'libtorch=*=cuda*' 'torchvision=*=cuda*' 'cuda-version=12.9' > "$CONDA_PREFIX/conda-meta/pinned"
+#
+# 3. Turn off Ultralytics' anonymous usage analytics, which are on by default:
+#      yolo settings sync=False
