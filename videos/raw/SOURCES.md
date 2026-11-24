@@ -6,6 +6,8 @@ Provenance manifest for the clips in this directory. Retrieved 2026-11-21 (UTC).
 - **Sources**: Pexels (8 clips), Pixabay (1), Wikimedia Commons (1).
 - **Mix**: 4 full 11-a-side views, 1 near-full view, 1 full-pitch training session and 4 small-sided views (one at night).
 - **Files are originals.** Nothing was re-encoded, trimmed or renamed internally, so each SHA-256 below is the hash of the file exactly as served.
+- **The media files are not in git.** GitHub refuses files over 100 MB, and the Pexels and Pixabay licences forbid redistributing the clips. Re-fetch each one from the direct file URL below and compare its SHA-256.
+- **The search's working files** are in `tmp/2026-11-20_video-search/` (git ignores it): candidate lists, download logs, previews, frame sheets and browser logs. Its scripts are in `util/ad-hoc/2026-11-20_video-search/`.
 
 ## Kept clips
 

@@ -3,6 +3,9 @@
 **Date**: 2026-11-20
 **Environment**: conda env `Flocker` at `/opt/miniforge3/envs/Flocker` (rebuild with `config/environment.yml`)
 **Validation script**: `util/ad-hoc/2026-11-20_validate_tool_sources.py` (read-only; re-run it to refresh the evidence)
+**Local copies** (git ignores both; moved here from another repository's scratch folder on 2026-11-24):
+- the reviewed `roboflow/sports` archive, in `tmp/2026-11-20_toolchain/downloads/`
+- the YOLO11n weights used in the end-to-end test, at `resources/models/yolo11n.pt`
 
 The toolchain covers the planned edits: detecting and tracking players, separating them from shadows,
 correcting the camera angle with a homography, drawing players as dots on a top-down pitch, scaling
