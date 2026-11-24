@@ -2,7 +2,7 @@
 # Created 2026-11-20; verified on an RTX 2080 (driver 580.x, which supports CUDA <= 13.0).
 #
 # Create:   mamba env create -f config/environment.yml
-# Then run the three post-create steps at the end of this file.
+# Then run the four post-create steps at the end of this file.
 #
 # Every package comes from conda-forge. Why the pins:
 #   cuda-version=12.9   Runs on the 580.x driver without relying on NVIDIA's minor-version
@@ -44,6 +44,11 @@ dependencies:
   - lap
   - ipykernel
   - pip
+  # Development: tests and formatting (added 2026-11-24; settings in pyproject.toml and .flake8)
+  - pytest
+  - black
+  - isort
+  - flake8
 # Post-create steps (run once, inside the activated environment):
 #
 # 1. roboflow/sports is on no package index. Install the reviewed commit without dependencies
@@ -52,8 +57,14 @@ dependencies:
 #      python -m pip install --no-deps "https://codeload.github.com/roboflow/sports/tar.gz/42c80c06b6b65a7f89455b89fe31cdf4c38ba227#sha256=169c88540f601514e9bbbb78ab31727cab42569f76fe6f6ff36e2494c413b26d"
 #    Never run `pip install sports`: that name is unclaimed on PyPI, so anyone could register it.
 #
-# 2. Stop later installs from changing the CUDA build:
+# 2. py-motmetrics (HOTA, CLEAR-MOT, IDF1) from a reviewed commit of its develop branch (2026-07-17): the
+#    last PyPI release (1.4.0, 2022) and conda-forge's (1.2.0, 2020) predate its HOTA fixes. Its only
+#    dependencies, numpy, pandas and scipy, are listed above; --no-build-isolation builds it with the
+#    environment's setuptools instead of downloading one. It reports version 1.4.0.
+#      python -m pip install --no-deps --no-build-isolation "https://codeload.github.com/cheind/py-motmetrics/tar.gz/e5ae766fab03b804f485d7c95ee1809b94d32dcc#sha256=824cee9062da4880343186c66ec023d9392f6d97aff617ddac559f46e1a8ebc8"
+#
+# 3. Stop later installs from changing the CUDA build:
 #      printf '%s\n' 'pytorch=*=cuda*' 'libtorch=*=cuda*' 'torchvision=*=cuda*' 'cuda-version=12.9' > "$CONDA_PREFIX/conda-meta/pinned"
 #
-# 3. Turn off Ultralytics' anonymous usage analytics, which are on by default:
+# 4. Turn off Ultralytics' anonymous usage analytics, which are on by default:
 #      yolo settings sync=False

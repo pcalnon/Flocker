@@ -1,0 +1,28 @@
+# Flocker: tool configuration for the analysis code under src/, its tests and the utilities.
+# The runtime environment is the conda environment in config/environment.yml; nothing here installs it.
+# Code is run from a checkout without installing it: pytest adds src/ to sys.path (below), and the
+# entry points in bin/ do the same.
+
+# Not reformatted: util/ad-hoc/ holds dated single-use records, and util/open_signed_pr.py stays as copied from
+# juniper-ml (see its header) so the two can be compared line by line.
+[tool.black]
+line-length = 512
+target-version = ["py312"]
+extend-exclude = '^/util/(ad-hoc/|open_signed_pr\.py)'
+
+[tool.isort]
+profile = "black"
+line_length = 512
+src_paths = ["src", "tests", "bin", "util"]
+known_first_party = ["flocker"]
+extend_skip_glob = ["util/ad-hoc/*", "util/open_signed_pr.py"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "unit: fast tests that need no dataset, video or GPU",
+    "integration: tests that read the real datasets under videos/raw/ (skipped when they are absent)",
+    "slow: tests that take more than a few seconds",
+]

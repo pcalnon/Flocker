@@ -261,3 +261,13 @@ __marimo__/
 *.pth
 *.onnx
 *.engine
+
+# Generated outputs stay local; the folders themselves are kept. Analysis and edit results (tracks, metrics,
+# renders) derive from licensed clips; built training datasets hold images cut from TeamTrack; trained models
+# and their run folders are large. Commit a result's summary to notes/ instead.
+/videos/analyze/*
+!/videos/analyze/.gitkeep
+/videos/edit/*
+!/videos/edit/.gitkeep
+/resources/datasets/
+/resources/models/
