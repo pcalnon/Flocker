@@ -1,2 +1,2 @@
 # Flocker
-Research into unexpected instances of flocking behavior, and their potential, real-world applications.
+Research into unexpected instances of flocking behavior and their potential real-world applications.
