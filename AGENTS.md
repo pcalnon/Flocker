@@ -136,7 +136,8 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
   - a new worktree, and remote control on;
   - `--dangerously-skip-permissions`, because the script sets `DEBUG=TRUE`.
 
-  Change the defaults in the script, not per session.
+  The owner confirmed these defaults, `DEBUG=TRUE` included, on 2026-11-24. Change them in the
+  script, not per session.
 - **Worktrees** are created by the launcher with `git worktree add`, never by Claude Code's own
   `--worktree`, which can only create worktrees under `.claude/worktrees/`.
   - They live under the primary checkout's `worktrees/` and are named

@@ -43,10 +43,12 @@ exists yet.
    Afterwards, update `AGENTS.md` § Launching sessions and § Git (they say "run with `bash`") and the
    `CLAUDE.md` import note.
 2. **Owner decisions:**
-   - keep `scripts/claude_interactive.bash`'s `DEBUG=TRUE`, which means `--dangerously-skip-permissions` on
-     every launch;
-   - repoint juniper-ml's broken local `kaggle` MCP entry at Kaggle's hosted server;
-   - triage the 43 modified files in juniper-ml worktree `shiny-pondering-gray` (see *Residue*).
+   - **Decided 2026-11-24:** `scripts/claude_interactive.bash` keeps `DEBUG=TRUE`, and with it
+     `--dangerously-skip-permissions` on every launch.
+   - **Done 2026-11-24:** juniper-ml's `kaggle` MCP entry now points at Kaggle's hosted server. See *Owner
+     actions*.
+   - **Still open:** triage the 43 modified files in juniper-ml worktree `shiny-pondering-gray` (see
+     *Residue*).
 3. **The research pipeline**, the five edits the owner asked about on 2026-11-20:
    1. remove shadows from moving and static objects;
    2. replace players with dots;
@@ -94,11 +96,16 @@ git commit -m "chore(repo): set executable bits; link CLAUDE.md and claudey"    
 git push -u origin chore/modes-and-symlinks && gh pr create --fill && gh pr merge --squash --delete-branch
 ```
 
-**juniper-ml's `kaggle` MCP server** is broken. `juniper-ml/.mcp.json` is untracked and shared by every
-juniper-ml session. Its stdio server runs from a uv virtual environment linked to `JuniperCascor1`'s Python,
-which moved from 3.13 to 3.14 on 2026-09-12, so the server can no longer import `kaggle`. Replace the entry
-with `{"type": "http", "url": "https://www.kaggle.com/mcp", "headers": {"Authorization": "Bearer
-${KAGGLE_API_TOKEN}"}}`. Kaggle's hosted server answered with 76 tools on 2026-11-20.
+**juniper-ml's `kaggle` MCP server was repointed on 2026-11-24, with the owner's approval.**
+- **The cause:** its stdio server ran from a uv virtual environment linked to `JuniperCascor1`'s Python. That
+  Python moved from 3.13 to 3.14 on 2026-09-12, so the server could no longer import `kaggle`.
+- **The new entry**, in the untracked `juniper-ml/.mcp.json`, is the same as Flocker's:
+  `{"type": "http", "url": "https://www.kaggle.com/mcp", "headers": {"Authorization": "Bearer ${KAGGLE_API_TOKEN:-}"}}`.
+- **The check:** `claude mcp get kaggle` reports it connected.
+- **Only that entry changed.** The old file is backed up, readable by the owner only because it holds a token,
+  in juniper-ml's `tmp/mcp-json-backups/`.
+- **Running sessions** pick up the change after `/mcp` or a restart.
+- **The old local server** in `~/.local/share/mcp-servers/kaggle-mcp/` is no longer used.
 
 ## Residue outside Flocker
 
