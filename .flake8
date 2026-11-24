@@ -1,0 +1,6 @@
+# flake8 reads no pyproject.toml, so its settings live here. Line length 512, as for black and isort.
+# E203 and W503 contradict black's formatting.
+[flake8]
+max-line-length = 512
+extend-ignore = E203, W503
+exclude = .git, __pycache__, .pytest_cache, tmp, worktrees, logs, videos, resources

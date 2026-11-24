@@ -53,16 +53,18 @@ These directives destroy work, break licences or publish secrets if ignored.
 ```text
 Flocker/                          # repo root (GitHub: pcalnon/Flocker)
 ├── AGENTS.md   CLAUDE.md (imports AGENTS.md)   README.md   LICENSE (CC0 1.0)
+├── pyproject.toml   .flake8      # black, isort and pytest settings; flake8's settings
 ├── .mcp.json                     # MCP servers: Kaggle, Hugging Face, Context7 (tokens from the environment)
 ├── .claude/settings.json         # SessionStart hook: TMPDIR = the primary checkout's tmp/
-├── bin/                          # executables and entry points (empty so far)
+├── bin/flocker.py                # command-line entry point: build-dataset, train, track, eval
 ├── config/environment.yml        # the Flocker conda environment
 ├── docs/                         # documentation (empty so far)
 ├── notes/                        # plans, analyses and records: FLOCKER_<YYYY-MM-DD>_<DESCRIPTION>.md
 ├── prompts/thread-handoff_automated-prompts/   # session handoffs: HANDOFF_<YYYY-MM-DD>_<desc>.md
 ├── resources/                    # reference material; resources/models/ holds weights (gitignored)
 ├── scripts/                      # session launchers: claude_interactive.bash, wake_the_claude.bash
-├── src/                          # project code (empty so far)
+├── src/flocker/                  # the analysis package: TeamTrack loading, detection, tracking, metrics
+├── tests/                        # pytest; markers unit, integration (real data) and slow
 ├── util/                         # permanent utilities; util/ad-hoc/ holds single-use scripts
 ├── videos/
 │   ├── raw/                      # source clips exactly as downloaded (media gitignored) + SOURCES.md
@@ -76,12 +78,14 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
 ## Environment and tools
 
 - **conda environment `Flocker`** (`/opt/miniforge3/envs/Flocker`, Python 3.12). Build it from
-  `config/environment.yml`, then run the three post-create steps at the end of that file.
+  `config/environment.yml`, then run the four post-create steps at the end of that file.
   - **PyTorch** runs on CUDA 12.9. The host has an RTX 2080 (compute capability 7.5), and its 580.x
     driver supports CUDA 13.0 and earlier.
   - **Vision and data:** OpenCV 4 (Qt GUI), Ultralytics YOLO with its trackers, supervision,
     mplsoccer, roboflow's `sports` (pinned to a reviewed commit), scikit-image, SciPy and pandas.
   - **Downloads:** the Kaggle and Hugging Face command-line tools, plus `yt-dlp` and `gdown`.
+  - **Evaluation and checks:** py-motmetrics for HOTA, CLEAR-MOT and IDF1, pinned to a reviewed GitHub
+    commit; pytest, black, isort and flake8.
   - Ultralytics' anonymous usage analytics are off (`yolo settings sync=False`).
   - Ultralytics is AGPL-3.0. That is fine for research; distributing software built on it brings
     AGPL obligations.
@@ -90,9 +94,11 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
   - `/usr/bin/ffmpeg` (8.0.1) has vid.stab, for stabilization.
   - Conda base's ffmpeg, first on PATH outside the environment, has no x264 at all.
 - **Source validation:** `notes/FLOCKER_2026-11-20_VIDEO-TOOLCHAIN-SETUP.md` records where every tool
-  came from, how it was checked, and what was left out and why. Re-run
-  `util/ad-hoc/2026-11-20_validate_tool_sources.py` to refresh the evidence before adding or upgrading
-  a tool. The order of preference for new tools is:
+  came from, how it was checked, and what was left out and why;
+  `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` records the 2026-11-24 additions. Run
+  `util/validate_tool_sources.py` before adding or upgrading a tool: with no options it re-checks the
+  whole recorded toolchain, and `--feedstock`, `--upstream`, `--pypi` and `--github-deps` check one
+  candidate. The order of preference for new tools is:
   1. MCP servers;
   2. conda-forge;
   3. PyPI;
@@ -124,6 +130,25 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
   - Re-fetch it with `util/ad-hoc/2026-11-20_fetch_teamtrack_soccer_top.py`, then verify it with
     `sha256sum -c SHA256SUMS`.
   - SoccerTrack holds the same 60 videos under LGPL-3.0, so use TeamTrack's copy.
+  - Ground-truth ids 0-10 and 11-21 are the two teams and 22 is the ball. Referees and staff are not
+    annotated. Six train sequences (`0570_0600` to `0720_0750`) have labels that drift ahead of the
+    video, and are left out of training. `tests/test_teamtrack.py` pins these facts, and
+    `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` shows the evidence.
+
+## Analysis pipeline
+
+- **Commands** run through `bin/flocker.py` with the Flocker interpreter; `<command> --help` lists the
+  options. The code finds the media in the primary checkout (`src/flocker/paths.py`), so it runs
+  from a worktree too. The order is:
+  1. `build-dataset`: TeamTrack train and val frames cut into full-resolution 1280 px tiles;
+  2. `train`: fine-tune YOLO on the tiles;
+  3. `track`: detect on whole 4K frames once, cache the detections, then run one tracker per class;
+  4. `eval`: HOTA, CLEAR-MOT and IDF1 against the ground truth, players and ball apart.
+- **Pass explicit output paths** under `videos/analyze/` or `tmp/`. Ultralytics' own defaults are
+  relative to the working directory, and its host-level `datasets_dir` points into another
+  repository.
+- **Results go in `notes/`**, with the commands that produced them:
+  `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` so far.
 
 ## Launching sessions
 
@@ -162,6 +187,10 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
     `tmp/`, and its path must be absolute, or the test refuses to build it.
   - Expect `PASS: 201 FAIL: 0`.
   - Without `--fixture`, the test runs only the dry-run and no-worktree cases.
+  - Run the primary checkout's copy. The test takes the primary to be the checkout it sits in, so a
+    worktree's copy fails 35 checks.
+  - In a Flocker session, prefix `env -u GIT_CEILING_DIRECTORIES`. The session's ceiling names
+    `tmp/`, so the "helper run from inside `tmp/`" case cannot find the repository and fails 2 checks.
 
 ## Temporary files: `tmp/`, never `/tmp` (mandatory)
 
@@ -211,7 +240,18 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
 
 ## Code conventions
 
-These apply as code lands in `src/`, `util/` and `bin/`. No linters or CI are configured yet.
+These apply to code in `src/`, `tests/`, `util/` and `bin/`.
+
+- **Run the checks before landing code.** There is no CI, and a commit made through the API runs no
+  local hooks.
+  - black, isort and pytest read `pyproject.toml`; flake8 reads `.flake8`.
+  - `util/ad-hoc/` and `util/open_signed_pr.py` are exempt from black and isort.
+
+  ```bash
+  P="conda run -n Flocker python -m"
+  $P pytest -q                # everything; -m unit for the fast tests, -m "not slow" to skip the long ones
+  $P black --check src tests bin util && $P isort --check-only src tests bin util && $P flake8 src tests bin util
+  ```
 
 - Python 3.12, run in the `Flocker` environment.
 - Names: PascalCase classes, snake_case functions and variables, UPPER_SNAKE constants.

@@ -2,7 +2,10 @@
 
 **Date**: 2026-11-20
 **Environment**: conda env `Flocker` at `/opt/miniforge3/envs/Flocker` (rebuild with `config/environment.yml`)
-**Validation script**: `util/ad-hoc/2026-11-20_validate_tool_sources.py` (read-only; re-run it to refresh the evidence)
+**Validation script**: `util/validate_tool_sources.py` (read-only; re-run it to refresh the evidence). It ran on
+2026-11-20 as `util/ad-hoc/2026-11-20_validate_tool_sources.py` and was promoted on 2026-11-24.
+**Later additions**: py-motmetrics, pytest, black, isort and flake8, recorded in
+`notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md`.
 **Local copies** (git ignores both; moved here from another repository's scratch folder on 2026-11-24):
 - the reviewed `roboflow/sports` archive, in `tmp/2026-11-20_toolchain/downloads/`
 - the YOLO11n weights used in the end-to-end test, at `resources/models/yolo11n.pt`
