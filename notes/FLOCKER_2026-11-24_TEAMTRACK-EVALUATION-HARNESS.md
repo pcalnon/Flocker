@@ -19,7 +19,12 @@ detections, tracks and metric tables
   TeamTrack's start at 0. The wrapper relabels every id before scoring.
 - **Off-the-shelf COCO YOLO is no baseline here.** Seen from directly above, players are not "persons" to it: it
   found 2 of 22 players on a test frame, at confidence 0.29 or below.
-- **A YOLO11n detector is fine-tuned** on full-resolution tiles of 36 train sequences. Its results are below.
+- **A YOLO11n detector is fine-tuned** on full-resolution tiles of 36 train sequences. On the 9 test sequences,
+  with ByteTrack:
+  - **positions are good:** centres within 15 px (about 0.5 m) give recall 97.8 % and precision 98.9 %, with a
+    mean error of 4.3 px;
+  - **IoU scores are lower:** HOTA 48.0 and MOTA 60.9, held down by box-size conventions;
+  - **identity is the weak point:** 773 track ids for 198 players.
 - **Six train sequences have labels that drift in time**, and are left out of training.
 - **The camera barely moves**: at most about 12 px across the whole match. One homography could serve every clip.
 
@@ -180,9 +185,87 @@ be trained on top-down data.
     low-score subsets, not the whole frame. So the box is matched by IoU instead.
 - **`eval` reads `run.json`** and, for a `--max-frames` run, scores only the frames that were processed.
 
-## Results (test split, 9 sequences, players)
+## Dots and speed-up (`src/flocker/render.py`): the owner's edits 2 and 5
 
-To be filled in once training finishes.
+- **What `dots` draws:** each tracked object as a dot.
+  - **Colours:** for ground truth, by team (red for ids 0-10, blue for 11-21); the ball is yellow. Tracker
+    output carries no team, so its dots are white.
+  - **Trails** are optional.
+- **What it draws on:**
+  - **`--background median`:** the per-pixel median of 45 frames spread over the clip. The camera is static, so
+    this is the pitch with the players erased; moving shadows would vanish the same way. The players are
+    replaced, not covered.
+  - **`--background frame`:** the original video.
+- **Speed-up** keeps every Nth frame at the source frame rate, so an N x clip plays smoothly. The output is
+  H.264, written by the environment's ffmpeg.
+- **The first clip:** the ground truth of `D_20220220_1_1530_1560` at 4x, written to
+  `videos/edit/2026-11-24_teamtrack-dots/` (ignored).
+  - 1920 x 1080, 225 frames, 7.5 s, 0.9 MB, made in 113 s.
+  - Checked by eye:
+    - on the median background, the pitch is clean, apart from faint near-static people beyond the bottom line;
+    - on a zoomed crop of frame 1 drawn over the video, each dot covers its player, with only limbs showing;
+    - the unlabelled referee gets no dot.
+- **Tests** (`tests/test_render.py`): the median erases a moving square; 4x keeps frames 1, 5, 9, ...; the dot
+  lands on the object.
+
+## Results (test split: 9 sequences, 8,100 frames, 178,155 player boxes)
+
+**The detector.** Training took 85 min; epoch 28 was best on the 720 val tiles:
+
+| Class | Precision | Recall | mAP50 | mAP50-95 |
+|---|---|---|---|---|
+| player | 0.801 | 0.835 | 0.797 | 0.272 |
+| ball | 0.861 | 0.846 | 0.849 | 0.365 |
+
+The weights are archived as `resources/models/flocker_yolo11n_teamtrack-tiles1280-e30_2026-11-24.pt` (gitignored;
+sha256 `84c9bce7…`). Detection ran at `imgsz` 3840, FP16, batch 2: 16-20 frames per second, so the whole test
+split took 8.4 min, tracking included.
+
+**Tracking, players:**
+
+| Tracker, scoring | HOTA | DetA | AssA | MOTA | MOTP | IDF1 | Rcll | Prcn | IDSW | Track ids (198 true) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ByteTrack, Kalman boxes, IoU ≥ 0.5 | 48.0 | 56.0 | 41.6 | 60.9 | 67.0 % IoU | 59.3 | 80.0 | 81.0 | 592 | 773 |
+| the same, without `1770_1800` | 49.6 | 58.6 | 42.2 | 73.3 | 67.5 % IoU | 64.3 | 86.2 | 87.3 | 529 | 683 |
+| ByteTrack, raw detection boxes, IoU | 47.9 | 55.9 | 41.5 | 60.5 | 66.9 % IoU | 59.0 | 79.8 | 80.8 | 614 | 774 |
+| BoT-SORT (no GMC or ReID), IoU | 48.9 | 56.2 | 42.9 | 61.2 | 66.9 % IoU | 60.6 | 80.3 | 81.0 | 496 | 682 |
+| ByteTrack, centres ≤ 15 px (about 0.5 m) | - | - | - | **96.4** | 4.3 px | 71.6 | **97.8** | **98.9** | 573 | 773 |
+
+1. **Positions are good, which is what the dots need.** Matching centres within 15 px:
+   - recall is 97.8 % and precision 98.9 %;
+   - the mean centre error is 4.3 px, about 0.15 m;
+   - all 198 true tracks are mostly tracked;
+   - false positives come to 0.23 a frame, so the detector learned to ignore the referees, as its labels do.
+2. **IoU scores understate the detector**, because box size is an annotation convention.
+   - `D_20220220_1_1770_1800`'s ground truth is drawn with boxes of median 42 x 40 px, against 24-39 px in every
+     other val and test sequence, while the detector draws about 28 x 28 everywhere.
+   - The positions agree: the median distance from a ground-truth centre to the nearest detection is 3-5 px at
+     frames 1, 300, 600 and 900.
+   - But a centred 28 x 28 box has IoU 0.47 inside a 42 x 40 one, so CLEAR counts each such detection as a miss
+     plus a false positive. That sequence alone scores MOTA −38.6.
+   - Across all sequences, MOTP is only 67 % IoU.
+3. **Identity is the weak point.**
+   - Tracks break and restart: 773 track ids for 198 players, about 570-600 identity switches, and IDF1 59-72.
+   - BoT-SORT, still without camera-motion compensation or ReID, is slightly better: 496 switches, 682 ids,
+     HOTA 48.9.
+   - Kalman-filtered and raw boxes make no difference.
+4. **The ball is not tracked usefully:** HOTA 10.7, recall 31 % by IoU and 41 % by centre, precision 44-57 %. A
+   small, fast object needs more than IoU association.
+5. **A look at the frames:** tracker output for `D_20220220_1_1530_1560` was drawn as dots over the video at 4x
+   (`videos/edit/2026-11-24_teamtrack-dots/`). On a zoomed crop around frame 481:
+   - the dots sit on the players;
+   - the referee gets none;
+   - one player on the halfway line is missed;
+   - several trail-less dots are newly started tracks, the fragmentation counted above.
+
+**Next:**
+- **Identity:**
+  - tune the trackers (`track_buffer`, thresholds);
+  - run BoT-SORT with images, for camera-motion compensation and ReID;
+  - try team-colour-aware association;
+  - try a larger detector.
+- **The ball:** a dedicated detector and tracker.
+- **The camera angle (edit 4):** a homography, which would also put the 15 px threshold in metres.
 
 ## Reproduce
 
@@ -194,4 +277,10 @@ $P train --data $E/datasets/tiles1280_e30/data.yaml --model ~/Development/python
     --project $E/runs --name yolo11n_tiles1280_e30 --epochs 30 --batch 8
 $P track --model $E/runs/yolo11n_tiles1280_e30/weights/best.pt --split test --out-dir $E/tracks/yolo11n_e30_bytetrack
 $P eval --pred-dir $E/tracks/yolo11n_e30_bytetrack --split test --out $E/tracks/yolo11n_e30_bytetrack/eval_players.csv
+$P eval --pred-dir $E/tracks/yolo11n_e30_bytetrack --split test --max-dist 15          # centre matching
+$P eval --pred-dir $E/tracks/yolo11n_e30_bytetrack --split test --objects ball
+# variants from the cached detections (copy detections/ into the new folder first):
+$P track --split test --out-dir $E/tracks/yolo11n_e30_botsort --reuse-detections --tracker botsort
+$P dots --sequence D_20220220_1_1530_1560 --tracks $E/tracks/yolo11n_e30_bytetrack/D_20220220_1_1530_1560.txt \
+    --out videos/edit/2026-11-24_teamtrack-dots/tracker_dots_4x.mp4 --background frame --trail 6
 ```

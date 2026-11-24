@@ -90,6 +90,18 @@ def test_misses_and_false_positives():
     assert extra["HOTA"] == pytest.approx(math.sqrt(0.5))  # DetA 4 / (4 + 4); AssA 1
 
 
+def test_center_matching_ignores_box_size():
+    """A 28 x 28 box centred in a 42 x 40 one (TeamTrack's 1770_1800 convention): IoU 784 / 1680 = 0.467."""
+    gt = pd.DataFrame([{"frame": f, "id": 0, "x": 0.0, "y": 0.0, "w": 42.0, "h": 40.0} for f in range(1, 6)])
+    pred = pd.DataFrame([{"frame": f, "id": 3, "x": 7.0, "y": 6.0, "w": 28.0, "h": 28.0} for f in range(1, 6)])
+    assert one(gt, pred)["MOTA"] == pytest.approx(-1.0)  # by IoU every frame is a miss plus a false positive
+    near = evaluate({"s": gt}, {"s": pred}, n_jobs=1, max_center_dist=5.0).loc["s"]
+    assert (near["MOTA"], near["IDF1"], near["MOTP"]) == (1.0, 1.0, 0.0)  # MOTP: mean centre distance, px
+    assert "HOTA" not in near.index
+    far = evaluate({"s": gt}, {"s": pred.assign(x=pred["x"] + 6)}, n_jobs=1, max_center_dist=5.0).loc["s"]
+    assert far["MOTA"] == pytest.approx(-1.0)  # centres 6 px apart: beyond 5 px
+
+
 def test_missing_prediction_counts_as_empty():
     gt = make_tracks(n_objects=2, n_frames=5)
     table = evaluate({"a": gt, "b": gt}, {"a": gt}, n_jobs=1)

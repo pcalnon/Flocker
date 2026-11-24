@@ -143,7 +143,9 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
   1. `build-dataset`: TeamTrack train and val frames cut into full-resolution 1280 px tiles;
   2. `train`: fine-tune YOLO on the tiles;
   3. `track`: detect on whole 4K frames once, cache the detections, then run one tracker per class;
-  4. `eval`: HOTA, CLEAR-MOT and IDF1 against the ground truth, players and ball apart.
+  4. `eval`: HOTA, CLEAR-MOT and IDF1 against the ground truth, players and ball apart;
+  5. `dots`: draw ground truth or tracks as dots, on the clip's empty pitch or on the frames, at N x
+     speed. These are the owner's edits 2 and 5.
 - **Pass explicit output paths** under `videos/analyze/` or `tmp/`. Ultralytics' own defaults are
   relative to the working directory, and its host-level `datasets_dir` points into another
   repository.

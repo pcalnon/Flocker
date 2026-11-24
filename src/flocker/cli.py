@@ -56,13 +56,14 @@ def cmd_eval(args: argparse.Namespace) -> int:
     if missing and not args.allow_missing:
         print(f"eval: no prediction file for {len(missing)} sequence(s), e.g. {args.pred_dir / (missing[0] + '.txt')}; pass --allow-missing to score them as empty", file=sys.stderr)
         return 2
-    table = evaluate(gts, preds, iou_threshold=args.iou, hota=not args.no_hota, n_jobs=args.jobs)
-    print(f"# {args.pred_dir} | split {args.split} | objects {args.objects} | CLEAR/ID IoU >= {args.iou}" + (f" | {len(missing)} missing, scored as empty" if missing else "") + (f" | ground truth clipped to the frames run.json says were processed: {', '.join(clipped)}" if clipped else ""))
+    table = evaluate(gts, preds, iou_threshold=args.iou, hota=not args.no_hota, n_jobs=args.jobs, max_center_dist=args.max_dist)
+    match = f"centres <= {args.max_dist} px (no HOTA)" if args.max_dist is not None else f"IoU >= {args.iou}"
+    print(f"# {args.pred_dir} | split {args.split} | objects {args.objects} | CLEAR/ID {match}" + (f" | {len(missing)} missing, scored as empty" if missing else "") + (f" | ground truth clipped to the frames run.json says were processed: {', '.join(clipped)}" if clipped else ""))
     print(format_table(table))
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         table.to_csv(args.out, float_format="%.6f")
-        meta = {"pred_dir": str(args.pred_dir), "split": args.split, "objects": args.objects, "iou_threshold": args.iou, "missing": missing, "hota_alpha": table.attrs.get("hota_alpha", {})}
+        meta = {"pred_dir": str(args.pred_dir), "split": args.split, "objects": args.objects, "iou_threshold": args.iou, "max_center_dist": args.max_dist, "missing": missing, "hota_alpha": table.attrs.get("hota_alpha", {})}
         args.out.with_suffix(".json").write_text(json.dumps(meta, indent=1))
         print(f"wrote {args.out} and {args.out.with_suffix('.json')}")
     return 0
@@ -156,6 +157,22 @@ def cmd_track(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dots(args: argparse.Namespace) -> int:
+    from flocker.mot import read_mot
+    from flocker.render import render_dots
+    from flocker.teamtrack import find_sequence, load_gt, team_of
+
+    seq = find_sequence(args.sequence, args.teamtrack_root)
+    if args.tracks:
+        tracks, source = read_mot(args.tracks), f"tracks {Path(args.tracks).name}"
+    else:
+        tracks, source = load_gt(seq), "ground truth"
+        tracks["team"] = team_of(tracks["id"])
+    out = render_dots(seq.video_path, tracks, args.out, speed=args.speed, background=args.background, width=args.width, radius=args.radius, trail=args.trail, label=f"{seq.name} {source}", max_frames=args.max_frames)
+    print(f"wrote {out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="flocker", description="Flocker: flocking behaviour in tracked video. Commands below; '<command> --help' for each.")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -166,6 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--objects", choices=["players", "ball", "all"], default="players", help="which objects to score (default: %(default)s); predictions are filtered by their class column")
     p.add_argument("--iou", type=float, default=0.5, help="IoU needed for a CLEAR-MOT/IDF1 match (default: %(default)s)")
     p.add_argument("--no-hota", action="store_true", help="skip HOTA (about 15 s per sequence)")
+    p.add_argument("--max-dist", type=float, default=None, metavar="PX", help="match box centres within PX pixels instead of IoU (CLEAR-MOT and IDF1; skips HOTA)")
     p.add_argument("--jobs", type=int, default=None, help="worker processes (default: half the CPUs, at most one per sequence)")
     p.add_argument("--allow-missing", action="store_true", help="score a sequence without a prediction file as empty instead of failing")
     p.add_argument("--out", type=Path, default=None, help="also write the table as CSV (and the settings and per-threshold HOTA as JSON beside it)")
@@ -212,6 +230,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="override a tracker setting, e.g. --set track_buffer=60 (repeatable)")
     p.add_argument("--box-source", choices=["track", "detection"], default="track", help="report Kalman-filtered track boxes or the matched raw detections (default: %(default)s)")
     p.set_defaults(func=cmd_track)
+
+    p = sub.add_parser("dots", help="render a TeamTrack clip's players as dots (ground truth, or a tracks file), sped up")
+    p.add_argument("--teamtrack-root", type=Path, default=None, help="TeamTrack soccer_top root (default: <primary checkout>/videos/raw/teamtrack_soccer_top)")
+    p.add_argument("--sequence", required=True, help="sequence name, e.g. D_20220220_1_1530_1560")
+    p.add_argument("--tracks", type=Path, default=None, help="a MOT tracks file; default: the sequence's ground truth, coloured by team")
+    p.add_argument("--out", type=Path, required=True, help="output .mp4 (H.264)")
+    p.add_argument("--speed", type=int, default=4, help="keep every Nth frame at the source frame rate (default: %(default)s)")
+    p.add_argument("--background", choices=["median", "frame"], default="median", help="the clip's empty pitch (players erased) or the original frames (default: %(default)s)")
+    p.add_argument("--width", type=int, default=1920, help="output width in pixels (default: %(default)s)")
+    p.add_argument("--radius", type=int, default=7, help="dot radius in output pixels (default: %(default)s)")
+    p.add_argument("--trail", type=int, default=0, help="draw each dot's last N output positions as a line (default: off)")
+    p.add_argument("--max-frames", type=int, default=None)
+    p.set_defaults(func=cmd_dots)
     return ap
 
 
