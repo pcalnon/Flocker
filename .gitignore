@@ -229,7 +229,11 @@ __marimo__/
 # Temporary files: sessions, scripts and tools write them under this repo's tmp/, never /tmp.
 /tmp/
 
-# Claude Code: the worktrees it creates for isolated sessions, and this host's own settings.
+# Worktrees: the launcher creates them under the primary checkout's worktrees/.
+/worktrees/
+
+# Claude Code: worktrees it may create itself for isolated sessions, and this host's own settings.
+# (scripts/wake_the_claude.bash copies settings.local.json into new worktrees only because it is ignored.)
 /.claude/worktrees/
 /.claude/settings.local.json
 
