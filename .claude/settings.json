@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ": flocker-repo-tmpdir; f=\"${CLAUDE_ENV_FILE:-}\"; [ -n \"$f\" ] || exit 0; unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR; p=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; c=$(git -C \"$p\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || exit 0; case \"$c\" in */.git) ;; *) exit 0;; esac; r=\"${c%/.git}\"; [ -n \"$r\" ] || exit 0; w=$(git -C \"$p\" rev-parse --show-toplevel 2>/dev/null); g=\"$r/tmp\"; if [ -n \"$w\" ] && [ \"$w\" != \"$r\" ]; then g=\"$g:$w/tmp\"; fi; mkdir -p \"$r/tmp\" && printf 'export TMPDIR=\"%s\" TMP=\"%s\" TEMP=\"%s\" GIT_CEILING_DIRECTORIES=\"%s${GIT_CEILING_DIRECTORIES:+:$GIT_CEILING_DIRECTORIES}\"\\n' \"$r/tmp\" \"$r/tmp\" \"$r/tmp\" \"$g\" >> \"$f\"; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
