@@ -58,6 +58,7 @@ Flocker/                          # repo root (GitHub: pcalnon/Flocker)
 ├── .claude/settings.json         # SessionStart hook: TMPDIR = the primary checkout's tmp/
 ├── bin/flocker.py                # command-line entry point: build-dataset, train, track, eval
 ├── config/environment.yml        # the Flocker conda environment
+├── config/trackers/              # tracker settings tuned for TeamTrack (flocker_bytetrack.yaml)
 ├── docs/                         # documentation (empty so far)
 ├── notes/                        # plans, analyses and records: FLOCKER_<YYYY-MM-DD>_<DESCRIPTION>.md
 ├── prompts/thread-handoff_automated-prompts/   # session handoffs: HANDOFF_<YYYY-MM-DD>_<desc>.md
@@ -142,15 +143,21 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
   from a worktree too. The order is:
   1. `build-dataset`: TeamTrack train and val frames cut into full-resolution 1280 px tiles;
   2. `train`: fine-tune YOLO on the tiles;
-  3. `track`: detect on whole 4K frames once, cache the detections, then run one tracker per class;
+  3. `track`: detect on whole 4K frames once and cache the detections. Then drop duplicate boxes (a
+     second NMS, `--dedup-iou 0.3`) and run one tracker per class, with the tuned ByteTrack settings
+     (`--tracker flocker`). `--teams` labels each player track's team from kit colour. Ultralytics'
+     own tracker defaults break player identities here: see `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md`;
   4. `eval`: HOTA, CLEAR-MOT and IDF1 against the ground truth, players and ball apart;
   5. `dots`: draw ground truth or tracks as dots, on the clip's empty pitch or on the frames, at N x
      speed. These are the owner's edits 2 and 5.
 - **Pass explicit output paths** under `videos/analyze/` or `tmp/`. Ultralytics' own defaults are
   relative to the working directory, and its host-level `datasets_dir` points into another
   repository.
+- **Tune on val, score test once.** Choose settings on the val split. Score the test split only with
+  settings already fixed, so test results stay unbiased.
 - **Results go in `notes/`**, with the commands that produced them:
-  `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` so far.
+  `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` and
+  `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md` so far.
 
 ## Launching sessions
 

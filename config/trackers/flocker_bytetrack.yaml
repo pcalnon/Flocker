@@ -1,0 +1,19 @@
+# Flocker: ByteTrack settings for top-down soccer players, tuned on TeamTrack's val split on 2026-11-24.
+# Evidence: notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md (util/ad-hoc/2026-11-24_tracker_sweep.py).
+# `bin/flocker.py track` uses this file by default (--tracker flocker), together with --dedup-iou 0.3: a second,
+# stricter NMS on the detections, without which these settings do worse than Ultralytics' own.
+#
+# Changes from Ultralytics' bytetrack.yaml, and why:
+#   fuse_score False (was True): the fine-tuned detector is under-confident (true players: median conf 0.40), and
+#       fusing the score into the IoU cost demands IoU > 0.6 from a conf-0.33 detection, so tracks broke and restarted
+#       while their players were in plain view;
+#   track_high_thresh 0.15 (was 0.25): more of those low-confidence players take part in the first association;
+#   match_thresh 0.9 (was 0.8): with no score fusion, a match needs IoU > 0.1 instead of 0.2.
+# track_buffer made no difference between 30 and 900 frames, so the default stays.
+tracker_type: bytetrack
+track_high_thresh: 0.15
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 30
+match_thresh: 0.9
+fuse_score: False
