@@ -10,7 +10,7 @@ License: CC0 1.0 (see LICENSE)
 Commands:
     build-dataset   cut TeamTrack train/val frames into full-resolution YOLO tiles
     train           fine-tune a YOLO detector on those tiles
-    track           detect (once, cached) and track players and the ball in TeamTrack videos
+    track           detect (once, cached) and track players and the ball in TeamTrack videos; --teams labels teams
     eval            score tracker output (a folder of <sequence>.txt MOT files) against TeamTrack ground truth
 """
 
@@ -114,9 +114,11 @@ def _sha256(path: Path) -> str:
 
 
 def cmd_track(args: argparse.Namespace) -> int:
+    import pandas as pd
+
     from flocker.mot import read_mot, write_mot
     from flocker.teamtrack import list_sequences
-    from flocker.track import detect_video, timed, track_detections
+    from flocker.track import detect_video, suppress_duplicates, timed, track_detections, tracker_config
 
     seqs = list_sequences(args.teamtrack_root, args.split)
     if args.sequences:
@@ -135,7 +137,8 @@ def cmd_track(args: argparse.Namespace) -> int:
         det_path = det_dir / f"{s.name}.txt"
         n_frames = min(info["seqlength"], args.max_frames) if args.max_frames else info["seqlength"]
         rec = run["sequences"].get(s.name, {})
-        if args.reuse_detections and det_path.is_file():
+        fresh = not (args.reuse_detections and det_path.is_file())
+        if not fresh:
             dets = read_mot(det_path)
         else:
             if model is None:
@@ -146,12 +149,28 @@ def cmd_track(args: argparse.Namespace) -> int:
             dets, seconds = timed(detect_video, s.video_path, model, imgsz=args.imgsz, conf=args.conf, iou=args.nms_iou, device=args.device, half=not args.fp32, batch=args.batch, max_frames=n_frames)
             write_mot(dets, det_path)
             rec["detect_seconds"], rec["detect_fps"] = round(seconds, 1), round(n_frames / seconds, 2)
-        tracks, seconds = timed(track_detections, dets, tracker=args.tracker, n_frames=n_frames, orig_shape=(info["imheight"], info["imwidth"]), box_source=args.box_source, **overrides)
+        if args.teams:
+            from flocker.team import detection_colours, label_teams
+
+            col_path = out_dir / "colours" / f"{s.name}.csv"
+            colours = None if fresh or not col_path.is_file() else pd.read_csv(col_path)
+            if colours is None or len(colours) != len(dets):  # colours are row-aligned with the detection file
+                colours, seconds = timed(detection_colours, s.video_path, dets)
+                col_path.parent.mkdir(exist_ok=True)
+                colours.to_csv(col_path, index=False, float_format="%.2f")
+                rec["colour_seconds"] = round(seconds, 1)
+            dets, team_model = label_teams(dets, colours)
+            rec["team_means_lab"] = team_model.means.round(1).tolist()
+        kept = dets if args.dedup_iou >= 1 else suppress_duplicates(dets, args.dedup_iou)
+        tracks, seconds = timed(track_detections, kept, tracker=args.tracker, n_frames=n_frames, orig_shape=(info["imheight"], info["imwidth"]), box_source=args.box_source, **overrides)
         write_mot(tracks, out_dir / f"{s.name}.txt")
-        rec.update({"frames": n_frames, "detections": int(len(dets)), "track_rows": int(len(tracks)), "track_ids": int(tracks["id"].nunique()), "track_seconds": round(seconds, 2)})
+        if args.teams:  # each track's team (0, 1, or -1: none, e.g. a goalkeeper or the ball), beside the tracks
+            (out_dir / "teams").mkdir(exist_ok=True)
+            tracks.groupby("id")["team"].first().rename_axis("id").reset_index().to_csv(out_dir / "teams" / f"{s.name}.csv", index=False)
+        rec.update({"frames": n_frames, "detections": int(len(dets)), "detections_kept": int(len(kept)), "track_rows": int(len(tracks)), "track_ids": int(tracks["id"].nunique()), "track_seconds": round(seconds, 2)})
         run["sequences"][s.name] = rec
-        print(f"{s.name}: {len(dets)} detections, {len(tracks)} track boxes, {tracks['id'].nunique()} ids" + (f", detect {rec['detect_fps']} fps" if "detect_fps" in rec else ""), flush=True)
-    run["tracking"] = {"tracker": args.tracker, "overrides": overrides, "box_source": args.box_source}
+        print(f"{s.name}: {len(dets)} detections ({len(kept)} after duplicate suppression), {len(tracks)} track boxes, {tracks['id'].nunique()} ids" + (f", detect {rec['detect_fps']} fps" if "detect_fps" in rec else ""), flush=True)
+    run["tracking"] = {"tracker": args.tracker, "settings": {k: v for k, v in vars(tracker_config(args.tracker, **overrides)).items()}, "overrides": overrides, "dedup_iou": args.dedup_iou, "teams": args.teams, "box_source": args.box_source}
     run_path.write_text(json.dumps(run, indent=1))
     print(f"wrote {len(seqs)} track files and {run_path}")
     return 0
@@ -165,6 +184,11 @@ def cmd_dots(args: argparse.Namespace) -> int:
     seq = find_sequence(args.sequence, args.teamtrack_root)
     if args.tracks:
         tracks, source = read_mot(args.tracks), f"tracks {Path(args.tracks).name}"
+        teams = Path(args.tracks).parent / "teams" / (Path(args.tracks).stem + ".csv")
+        if teams.is_file():  # written by track --teams
+            import pandas as pd
+
+            tracks["team"] = tracks["id"].map(pd.read_csv(teams).set_index("id")["team"]).fillna(-1).astype(int)
     else:
         tracks, source = load_gt(seq), "ground truth"
         tracks["team"] = team_of(tracks["id"])
@@ -226,15 +250,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--device", default="0")
     p.add_argument("--max-frames", type=int, default=None, help="only the first N frames of each sequence")
     p.add_argument("--reuse-detections", action="store_true", help="track from detections/<seq>.txt when it exists")
-    p.add_argument("--tracker", default="bytetrack", help="Ultralytics tracker name or YAML (default: %(default)s)")
+    p.add_argument("--tracker", default="flocker", help="'flocker' (config/trackers/flocker_bytetrack.yaml: ByteTrack tuned on TeamTrack's val split), an Ultralytics tracker name such as bytetrack, or a YAML path (default: %(default)s)")
     p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help="override a tracker setting, e.g. --set track_buffer=60 (repeatable)")
+    p.add_argument("--dedup-iou", type=float, default=0.3, metavar="IOU", help="before tracking, drop a detection overlapping a higher-scoring one of its class by more than IOU (a second NMS; 1 turns it off; default: %(default)s)")
+    p.add_argument("--teams", action="store_true", help="label each player track with its team from kit colours: writes colours/<seq>.csv (cached) and teams/<seq>.csv (id,team; -1: neither team)")
     p.add_argument("--box-source", choices=["track", "detection"], default="track", help="report Kalman-filtered track boxes or the matched raw detections (default: %(default)s)")
     p.set_defaults(func=cmd_track)
 
     p = sub.add_parser("dots", help="render a TeamTrack clip's players as dots (ground truth, or a tracks file), sped up")
     p.add_argument("--teamtrack-root", type=Path, default=None, help="TeamTrack soccer_top root (default: <primary checkout>/videos/raw/teamtrack_soccer_top)")
     p.add_argument("--sequence", required=True, help="sequence name, e.g. D_20220220_1_1530_1560")
-    p.add_argument("--tracks", type=Path, default=None, help="a MOT tracks file; default: the sequence's ground truth, coloured by team")
+    p.add_argument("--tracks", type=Path, default=None, help="a MOT tracks file; default: the sequence's ground truth, coloured by team. Tracks are coloured by team too when track --teams wrote teams/<seq>.csv beside them")
     p.add_argument("--out", type=Path, required=True, help="output .mp4 (H.264)")
     p.add_argument("--speed", type=int, default=4, help="keep every Nth frame at the source frame rate (default: %(default)s)")
     p.add_argument("--background", choices=["median", "frame"], default="median", help="the clip's empty pitch (players erased) or the original frames (default: %(default)s)")

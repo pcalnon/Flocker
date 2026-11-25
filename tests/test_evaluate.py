@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from flocker.evaluate import HOTA_ALPHAS, evaluate, to_motmetrics
+from flocker.evaluate import HOTA_ALPHAS, evaluate, switch_events, to_motmetrics
 from synthetic import make_tracks
 
 pytestmark = pytest.mark.unit
@@ -200,3 +200,29 @@ def test_parallel_equals_serial():
     gts = {f"s{k}": make_tracks(n_objects=4, n_frames=20, seed=k) for k in range(3)}
     preds = {k: _noisy(v, seed=20 + i) for i, (k, v) in enumerate(gts.items())}
     assert evaluate(gts, preds, n_jobs=1).equals(evaluate(gts, preds, n_jobs=3))
+
+
+def _walk(frames, gt_id, x0, y=0.0):
+    """One 10 x 10 object moving 1 px per frame in x."""
+    return [(f, gt_id, x0 + f, y) for f in frames]
+
+
+def test_switch_events_classifies_restart_swap_and_other():
+    """Three objects far apart (500 px), each shown a different identity failure.
+
+    Object 0, tracked as id 10 to frame 10, missed for frames 11-14 and picked up by a new id 11 at frame 15: a
+    restart with gap 4. Objects 1 and 2, tracked as ids 20 and 30, exchange ids at frame 11: two swaps. Object 3,
+    tracked as id 40, which leaves it at frame 11 for empty pitch while a new id 41 takes the object over: other.
+    """
+    frames = range(1, 21)
+    gt = boxes(_walk(frames, 0, 0) + _walk(frames, 1, 500) + _walk(frames, 2, 1000) + _walk(frames, 3, 1500))
+    pred = boxes(_walk(range(1, 11), 10, 0) + _walk(range(15, 21), 11, 0) + _walk(range(1, 11), 20, 500) + _walk(range(11, 21), 20, 1000) + _walk(range(1, 11), 30, 1000) + _walk(range(11, 21), 30, 500) + _walk(range(1, 11), 40, 1500) + _walk(range(11, 21), 40, 1500, y=300.0) + _walk(range(11, 21), 41, 1500))
+    ev = switch_events(gt, pred).set_index("gt_id")
+    assert sorted(ev.index) == [0, 1, 2, 3]
+    assert ev.loc[0, "kind"] == "restart" and (ev.loc[0, "frame"], ev.loc[0, "gap"], ev.loc[0, "prev_id"], ev.loc[0, "new_id"]) == (15, 4, 10, 11)
+    assert (ev.loc[0, "jump_frames"], ev.loc[0, "jump_px"]) == (5, pytest.approx(5.0))
+    assert ev.loc[1, "kind"] == "swap" and ev.loc[2, "kind"] == "swap" and (ev.loc[1, "new_id"], ev.loc[2, "new_id"]) == (30, 20)
+    assert ev.loc[3, "kind"] == "other" and (ev.loc[3, "prev_id"], ev.loc[3, "new_id"], ev.loc[3, "gap"]) == (40, 41, 0)
+    assert len(switch_events(gt, gt)) == 0
+    centre = switch_events(gt, pred, max_center_dist=3.0).set_index("gt_id")  # same story by centre distance
+    assert centre["kind"].to_dict() == ev["kind"].to_dict()

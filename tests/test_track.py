@@ -14,7 +14,7 @@ import pytest
 
 from flocker.evaluate import evaluate
 from flocker.mot import BALL, PLAYER
-from flocker.track import ID_OFFSET, track_detections
+from flocker.track import ID_OFFSET, suppress_duplicates, track_detections
 from synthetic import make_tracks
 
 pytestmark = pytest.mark.unit
@@ -58,3 +58,15 @@ def test_empty_frames_age_tracks_out():
     assert tracks["id"].nunique() == 1
     short = track_detections(gap, n_frames=30, track_buffer=5)  # a 5-frame buffer forgets it
     assert short["id"].nunique() == 2
+
+
+def test_suppress_duplicates_is_greedy_nms_per_frame_and_class():
+    """Boxes 30 x 30. A (0.9) at x 0; B (0.8) at x 8: IoU(A, B) = 22 / 38 = 0.579; C (0.7) at x 16: IoU(B, C) 0.579 and
+    IoU(A, C) = 14 / 46 = 0.304. At 0.5, A suppresses B, and B, being suppressed, cannot suppress C. At 0.6 all three
+    stay. A ball box on top of A and a copy of B in another frame are untouched."""
+    rows = [(1, 0.0, 0.9, PLAYER), (1, 8.0, 0.8, PLAYER), (1, 16.0, 0.7, PLAYER), (1, 2.0, 0.6, BALL), (2, 8.0, 0.8, PLAYER)]
+    dets = pd.DataFrame([{"frame": f, "id": -1, "x": x, "y": 100.0, "w": 30.0, "h": 30.0, "conf": c, "cls": k} for f, x, c, k in rows])
+    kept = suppress_duplicates(dets, 0.5)
+    assert sorted(zip(kept["frame"], kept["x"], kept["cls"])) == [(1, 0.0, PLAYER), (1, 2.0, BALL), (1, 16.0, PLAYER), (2, 8.0, PLAYER)]
+    assert len(suppress_duplicates(dets, 0.6)) == 5
+    assert len(suppress_duplicates(dets, 0.25)) == 3  # A now also suppresses C; the ball and frame 2 remain

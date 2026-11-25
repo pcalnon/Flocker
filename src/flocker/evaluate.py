@@ -149,6 +149,74 @@ def evaluate(gts: Mapping[str, pd.DataFrame], preds: Mapping[str, pd.DataFrame],
     return table
 
 
+def match_centres(gt: pd.DataFrame, pred: pd.DataFrame, max_dist: float = 15.0) -> pd.Series:
+    """For each row of pred, the ground-truth id it matches in its frame, or -1: a one-to-one assignment per frame
+    minimising total centre distance, keeping pairs within max_dist pixels. Indexed like pred."""
+    from scipy.optimize import linear_sum_assignment
+
+    from flocker.mot import centers
+
+    out = pd.Series(-1, index=pred.index, dtype=int)
+    by_frame = dict(iter(gt.groupby("frame")))
+    for f, p in pred.groupby("frame"):
+        g = by_frame.get(f)
+        if g is None:
+            continue
+        d = np.hypot(*(centers(g)[:, None] - centers(p)[None]).transpose(2, 0, 1))
+        r, c = linear_sum_assignment(np.where(d <= max_dist, d, 1e9))
+        ok = d[r, c] <= max_dist
+        out.loc[p.index[c[ok]]] = g["id"].to_numpy()[r[ok]]
+    return out
+
+
+def switch_events(gt: pd.DataFrame, pred: pd.DataFrame, iou_threshold: float = 0.5, max_center_dist: float | None = None) -> pd.DataFrame:
+    """Every CLEAR-MOT identity switch of one sequence, classified by its cause.
+
+    A switch is motmetrics' SWITCH event: a ground-truth object matched to a different prediction id than at its
+    previous match. Matching is as in evaluate(): IoU >= iou_threshold, or centres within max_center_dist pixels.
+    One row per switch, with original (not relabelled) ids:
+        frame, gt_id, prev_id, new_id
+        gap            frames the object went unmatched between its two matches (0: consecutive frames)
+        prev_last      prev_id's last frame in pred; new_first: new_id's first frame in pred
+        jump_frames    new_first - prev_last; jump_px: distance from prev_id's last centre to new_id's first
+        kind           "restart": prev_id had ended and new_id was born after the object's previous match, a
+                       broken track that linking could repair; "swap": new_id had been matched to another object
+                       before; "other": anything else (e.g. prev_id lives on, following something else)
+    """
+    gt, pred = normalize_mot(gt), normalize_mot(pred)
+    g, p = to_motmetrics(gt), to_motmetrics(pred)
+    gt_ids, pred_ids = np.sort(gt["id"].unique()), np.sort(pred["id"].unique())
+    if max_center_dist is None:
+        acc = mm.utils.compare_to_groundtruth(g, p, "iou", distth=1.0 - iou_threshold)
+    else:
+        acc = mm.utils.compare_to_groundtruth(g, p, "euclidean", distfields=["CX", "CY"], distth=float(max_center_dist))
+    ev = acc.mot_events.reset_index()
+    m = ev[ev["Type"].isin(["MATCH", "SWITCH"])][["FrameId", "Type", "OId", "HId"]].astype({"FrameId": int, "OId": int, "HId": int})
+    columns = ["frame", "gt_id", "prev_id", "new_id", "gap", "prev_last", "new_first", "jump_frames", "jump_px", "kind"]
+    if not (m["Type"] == "SWITCH").any():
+        return pd.DataFrame(columns=columns)
+    p = p.reset_index()
+    span = p.groupby("Id")["FrameId"].agg(["min", "max"])
+    first_c = p.sort_values("FrameId").groupby("Id")[["CX", "CY"]].first()
+    last_c = p.sort_values("FrameId").groupby("Id")[["CX", "CY"]].last()
+    matched_by = {hid: d[["OId", "FrameId"]].to_numpy() for hid, d in m.groupby("HId")}  # each prediction id's (object, frame) matches
+    rows = []
+    for o, d in m.sort_values("FrameId").groupby("OId"):
+        f, h = d["FrameId"].to_numpy(), d["HId"].to_numpy()
+        for i in np.flatnonzero(d["Type"].to_numpy() == "SWITCH"):
+            if i == 0:
+                continue  # motmetrics only switches an object it has matched before; kept for safety
+            f_prev, h_prev, h_new = f[i - 1], h[i - 1], h[i]
+            earlier = matched_by[h_new]
+            was_matched = bool(((earlier[:, 0] != o) & (earlier[:, 1] < f[i])).any())
+            prev_last, new_first = int(span.loc[h_prev, "max"]), int(span.loc[h_new, "min"])
+            restart = prev_last < f[i] and new_first > f_prev
+            jump = float(np.hypot(*(first_c.loc[h_new].to_numpy() - last_c.loc[h_prev].to_numpy())))
+            kind = "swap" if was_matched else ("restart" if restart else "other")
+            rows.append((int(f[i]), int(gt_ids[o - 1]), int(pred_ids[h_prev - 1]), int(pred_ids[h_new - 1]), int(f[i] - f_prev - 1), prev_last, new_first, new_first - prev_last, jump, kind))
+    return pd.DataFrame(rows, columns=columns).sort_values(["frame", "gt_id"]).reset_index(drop=True)
+
+
 def format_table(table: pd.DataFrame) -> str:
     """The table with rates as percentages (one decimal) and counts as integers; a centre-mode MOTP in pixels."""
     center = table.attrs.get("max_center_dist") is not None

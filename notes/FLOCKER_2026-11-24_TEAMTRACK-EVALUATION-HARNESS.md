@@ -258,7 +258,7 @@ split took 8.4 min, tracking included.
    - one player on the halfway line is missed;
    - several trail-less dots are newly started tracks, the fragmentation counted above.
 
-**Next:**
+**Next** (the identity item is done: `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md`):
 - **Identity:**
   - tune the trackers (`track_buffer`, thresholds);
   - run BoT-SORT with images, for camera-motion compensation and ReID;
@@ -268,6 +268,10 @@ split took 8.4 min, tracking included.
 - **The camera angle (edit 4):** a homography, which would also put the 15 px threshold in metres.
 
 ## Reproduce
+
+These commands ran with the `track` defaults of the time: Ultralytics' ByteTrack, and no duplicate suppression.
+`notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md` changed the defaults. To repeat these runs, add
+`--tracker bytetrack --dedup-iou 1` to each `track` command.
 
 ```bash
 E=~/Development/python/Flocker/tmp/2026-11-24_teamtrack-eval

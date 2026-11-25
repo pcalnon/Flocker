@@ -19,14 +19,20 @@ The video work is organised as five edits:
   perturbed real data.
 - **A YOLO11n player and ball detector** has been fine-tuned on full-resolution tiles of TeamTrack's top-view
   clips.
-- **Players can be redrawn as dots** on the clip's empty pitch (edit 2), at N x speed (edit 5).
+- **Players keep their identities through a clip.** On TeamTrack's test split, the identity score IDF1 is 97.3
+  (centres within 15 px), up from 71.4 with Ultralytics' tracker defaults. That leaves 36 identity switches in
+  99 player-minutes (9 clips of 30 s, 22 players).
+- **Each player's team comes from kit colour,** with goalkeepers kept apart; 98.9 % of the test split's tracked
+  outfield positions carry the right team.
+- **Players can be redrawn as dots** on the clip's empty pitch (edit 2), at N x speed (edit 5), coloured by team.
 - **Not done yet:**
   - edit 4, correcting the camera angle with a homography;
   - edit 3, scaling movement;
   - edit 1, removing shadows on the stock clips;
   - the flocking analysis itself.
 
-Results and how they were obtained: `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md`.
+Results and how they were obtained: `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` (the harness and the
+detector) and `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md` (identity and team labels).
 
 ## Quick start
 
@@ -37,6 +43,7 @@ needs no installation:
 P="conda run -n Flocker python bin/flocker.py"
 $P --help                                         # build-dataset, train, track, eval, dots
 $P dots --sequence D_20220220_1_1530_1560 --out videos/edit/gt_dots_4x.mp4 --speed 4   # videos/edit/ is gitignored
+$P track --model <weights> --split test --out-dir <folder> --teams   # tracks, plus each track's team
 $P eval --pred-dir <folder of <sequence>.txt MOT files> --split test
 conda run -n Flocker python -m pytest -q -m unit # fast tests; plain `pytest -q` adds the real-data ones
 ```
