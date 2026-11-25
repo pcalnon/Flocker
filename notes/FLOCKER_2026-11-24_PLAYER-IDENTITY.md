@@ -250,7 +250,7 @@ Players, 9 sequences, 178,155 boxes (`sweep_test.csv`; the `final` stage):
    - **Restarts:** offline linking of tracklets could join them.
    - **Swaps:** they need appearance beyond kit colour, or motion over longer spans.
 3. **Edit 4, the homography,** as planned. The pixels-per-metre figure needs measuring: the harness note uses about
-   37 px/m, the handoff about 28.
+   37 px/m, the handoff about 28. *Done 2026-11-25:* 27.9 px/m, with a homography for every frame (`notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md`).
 4. **The flocking analysis** can now use team labels.
 5. **The ball,** still unusable: it needs a dedicated approach.
 

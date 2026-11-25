@@ -112,8 +112,9 @@ def evaluate(gts: Mapping[str, pd.DataFrame], preds: Mapping[str, pd.DataFrame],
     """Score each sequence in ``gts`` against ``preds`` (a missing prediction counts as empty).
 
     Returns one row per sequence plus "OVERALL", with COLUMNS (HOTA, DetA and AssA only when hota is true).
-    ``attrs["hota_alpha"]`` holds each row's HOTA at every threshold in HOTA_ALPHAS. With max_center_dist (pixels),
-    CLEAR-MOT and IDF1 match box centres instead of IoU, HOTA is skipped and MOTP is the mean centre distance.
+    ``attrs["hota_alpha"]`` holds each row's HOTA at every threshold in HOTA_ALPHAS. With max_center_dist (in the boxes'
+    units: pixels, or metres for boxes mapped to the pitch), CLEAR-MOT and IDF1 match box centres instead of IoU, HOTA
+    is skipped and MOTP is the mean centre distance.
     """
     names = list(gts)
     if not names:
@@ -217,15 +218,16 @@ def switch_events(gt: pd.DataFrame, pred: pd.DataFrame, iou_threshold: float = 0
     return pd.DataFrame(rows, columns=columns).sort_values(["frame", "gt_id"]).reset_index(drop=True)
 
 
-def format_table(table: pd.DataFrame) -> str:
-    """The table with rates as percentages (one decimal) and counts as integers; a centre-mode MOTP in pixels."""
+def format_table(table: pd.DataFrame, unit: str = "px") -> str:
+    """The table with rates as percentages (one decimal) and counts as integers; a centre-mode MOTP in ``unit``
+    ("px", or "m" for centres on the pitch)."""
     center = table.attrs.get("max_center_dist") is not None
     rates = ["HOTA", "DetA", "AssA", "MOTA", "MOTP", "IDF1", "IDP", "IDR", "Rcll", "Prcn"]
     if center:
         rates.remove("MOTP")
     out = table.copy()
     if center:
-        out["MOTP"] = out["MOTP"].map(lambda v: f"{v:.1f}px" if pd.notna(v) else "-")
+        out["MOTP"] = out["MOTP"].map(lambda v: (f"{v:.2f}m" if unit == "m" else f"{v:.1f}{unit}") if pd.notna(v) else "-")
     for c in [c for c in out.columns if not (center and c == "MOTP")]:
         out[c] = out[c].map(lambda v: f"{100 * v:.1f}" if pd.notna(v) else "-") if c in rates else out[c].map(lambda v: f"{int(v)}" if pd.notna(v) else "-")
     return out.to_string()

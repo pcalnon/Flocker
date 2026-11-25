@@ -11,7 +11,9 @@ Commands:
     build-dataset   cut TeamTrack train/val frames into full-resolution YOLO tiles
     train           fine-tune a YOLO detector on those tiles
     track           detect (once, cached) and track players and the ball in TeamTrack videos; --teams labels teams
+    pitch           fit the image-to-pitch homography of every frame of TeamTrack videos (pixels to metres)
     eval            score tracker output (a folder of <sequence>.txt MOT files) against TeamTrack ground truth
+    dots            render ground truth or tracks as dots, as filmed or straight down onto the pitch, sped up
 """
 
 import argparse
@@ -19,7 +21,7 @@ import json
 import sys
 from pathlib import Path
 
-from flocker.teamtrack import SPLITS
+from flocker.teamtrack import PITCH_SIZE_M, SPLITS
 
 
 def _add_dataset_args(p: argparse.ArgumentParser) -> None:
@@ -41,6 +43,9 @@ def cmd_eval(args: argparse.Namespace) -> int:
         return 2
     run_path = args.pred_dir / "run.json"
     processed = {k: v.get("frames") for k, v in json.loads(run_path.read_text()).get("sequences", {}).items()} if run_path.is_file() else {}
+    if args.max_dist_m is not None and args.pitch_dir is None:
+        print("eval: --max-dist-m needs --pitch-dir (the output of the pitch command)", file=sys.stderr)
+        return 2
     gts, preds, missing, clipped = {}, {}, [], []
     for s in seqs:
         gt = load_gt(s, objects=args.objects)
@@ -56,17 +61,35 @@ def cmd_eval(args: argparse.Namespace) -> int:
     if missing and not args.allow_missing:
         print(f"eval: no prediction file for {len(missing)} sequence(s), e.g. {args.pred_dir / (missing[0] + '.txt')}; pass --allow-missing to score them as empty", file=sys.stderr)
         return 2
-    table = evaluate(gts, preds, iou_threshold=args.iou, hota=not args.no_hota, n_jobs=args.jobs, max_center_dist=args.max_dist)
-    match = f"centres <= {args.max_dist} px (no HOTA)" if args.max_dist is not None else f"IoU >= {args.iou}"
+    max_dist = args.max_dist
+    if args.max_dist_m is not None:  # match centres in pitch metres: each box becomes a point at its centre's pitch position
+        from flocker.pitch import read_homographies
+
+        for name in gts:
+            table_h = read_homographies(args.pitch_dir / f"{name}.csv")
+            gts[name] = _centres_in_metres(gts[name], table_h)
+            if name in preds:
+                preds[name] = _centres_in_metres(preds[name], table_h)
+        max_dist = args.max_dist_m
+    table = evaluate(gts, preds, iou_threshold=args.iou, hota=not args.no_hota, n_jobs=args.jobs, max_center_dist=max_dist)
+    match = f"centres <= {args.max_dist_m} m on the pitch (no HOTA; MOTP in metres)" if args.max_dist_m is not None else f"centres <= {args.max_dist} px (no HOTA)" if args.max_dist is not None else f"IoU >= {args.iou}"
     print(f"# {args.pred_dir} | split {args.split} | objects {args.objects} | CLEAR/ID {match}" + (f" | {len(missing)} missing, scored as empty" if missing else "") + (f" | ground truth clipped to the frames run.json says were processed: {', '.join(clipped)}" if clipped else ""))
-    print(format_table(table))
+    print(format_table(table, unit="m" if args.max_dist_m is not None else "px"))
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         table.to_csv(args.out, float_format="%.6f")
-        meta = {"pred_dir": str(args.pred_dir), "split": args.split, "objects": args.objects, "iou_threshold": args.iou, "max_center_dist": args.max_dist, "missing": missing, "hota_alpha": table.attrs.get("hota_alpha", {})}
+        meta = {"pred_dir": str(args.pred_dir), "split": args.split, "objects": args.objects, "iou_threshold": args.iou, "max_center_dist": args.max_dist, "max_center_dist_m": args.max_dist_m, "pitch_dir": str(args.pitch_dir) if args.pitch_dir else None, "missing": missing, "hota_alpha": table.attrs.get("hota_alpha", {})}
         args.out.with_suffix(".json").write_text(json.dumps(meta, indent=1))
         print(f"wrote {args.out} and {args.out.with_suffix('.json')}")
     return 0
+
+
+def _centres_in_metres(df, table_h):
+    """A MOT frame whose boxes are points (w = h = 0) at their centres' pitch positions, in metres."""
+    from flocker.pitch import with_pitch_positions
+
+    m = with_pitch_positions(df, table_h)
+    return m.assign(x=m["mx"], y=m["my"], w=0.0, h=0.0).drop(columns=["mx", "my"])
 
 
 def cmd_build_dataset(args: argparse.Namespace) -> int:
@@ -176,6 +199,58 @@ def cmd_track(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pitch_one(task) -> dict:
+    """Fit and follow one sequence's image-to-pitch homography (runs in a worker process)."""
+    import cv2
+
+    from flocker.pitch import camera_motion, draw_markings, find_spots, fit_pitch, homography_from_corners, track_pitch
+
+    seq, out_dir, corners, length, width, max_frames = task
+    cv2.setNumThreads(2)
+    cap = cv2.VideoCapture(str(seq.video_path))
+    ok, first = cap.read()
+    cap.release()
+    if not ok:
+        raise RuntimeError(f"cannot read {seq.video_path}")
+    ref, _ = fit_pitch(first, homography_from_corners(corners, length, width), length, width, fit_size=False)
+    ref.stats["spots"] = find_spots(first, ref)
+    table = track_pitch(seq.video_path, ref, max_frames=max_frames)
+    table.to_csv(out_dir / f"{seq.name}.csv", index=False, float_format="%.12g")
+    summary = {"frames": int(len(table)), "restarts": int(table["restart"].sum()), "observations_min": int(table["observations"].min()), "rms_px_median": float(table["rms_px"].median()), "rms_px_max": float(table["rms_px"].max()), **camera_motion(table)}
+    ref.stats["tracking"] = summary
+    ref.save(out_dir / f"{seq.name}.json")
+    overlay = draw_markings(first.copy(), ref.h_inv, ref.markings(), (0, 0, 255), 1)
+    (out_dir / "overlays").mkdir(exist_ok=True)
+    cv2.imwrite(str(out_dir / "overlays" / f"{seq.name}.jpg"), cv2.resize(overlay, (first.shape[1] // 2, first.shape[0] // 2), interpolation=cv2.INTER_AREA), [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return {"sequence": seq.name, "reference_rms_px": ref.stats["rms_px"], **summary}
+
+
+def cmd_pitch(args: argparse.Namespace) -> int:
+    from concurrent.futures import ProcessPoolExecutor
+
+    from flocker.teamtrack import PITCH_CORNERS_PX, list_sequences
+
+    seqs = list_sequences(args.teamtrack_root, args.split)
+    if args.sequences:
+        seqs = [s for s in seqs if s.name in set(args.sequences)]
+    if not seqs:
+        print("pitch: no sequences selected", file=sys.stderr)
+        return 2
+    out_dir = args.out_dir.resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    run_path = out_dir / "run.json"
+    run = json.loads(run_path.read_text()) if run_path.is_file() else {"settings": None, "sequences": {}}
+    run["settings"] = {"length_m": args.length, "width_m": args.width, "start_corners_px": PITCH_CORNERS_PX, "max_frames": args.max_frames}
+    tasks = [(s, out_dir, PITCH_CORNERS_PX, args.length, args.width, args.max_frames) for s in seqs]
+    with ProcessPoolExecutor(min(args.jobs, len(tasks))) as ex:
+        for res in ex.map(_pitch_one, tasks):
+            run["sequences"][res["sequence"]] = res
+            print(f"{res['sequence']}: {res['frames']} frames, line RMS {res['rms_px_median']:.2f} px (max {res['rms_px_max']:.2f}), {res['restarts']} restarts; camera moved up to {res['corner_shift_px_max']:.1f} px, yaw range {res['yaw_deg_range']:.2f} deg", flush=True)
+    run_path.write_text(json.dumps(run, indent=1))
+    print(f"wrote {len(seqs)} homography tables (<sequence>.csv), fits (<sequence>.json), overlays/ and {run_path}")
+    return 0
+
+
 def cmd_dots(args: argparse.Namespace) -> int:
     from flocker.mot import read_mot
     from flocker.render import render_dots
@@ -192,7 +267,13 @@ def cmd_dots(args: argparse.Namespace) -> int:
     else:
         tracks, source = load_gt(seq), "ground truth"
         tracks["team"] = team_of(tracks["id"])
-    out = render_dots(seq.video_path, tracks, args.out, speed=args.speed, background=args.background, width=args.width, radius=args.radius, trail=args.trail, label=f"{seq.name} {source}", max_frames=args.max_frames)
+    pitch = None
+    if args.pitch_dir is not None:
+        from flocker.pitch import PitchFit, read_homographies
+
+        fit = PitchFit.load(args.pitch_dir / f"{seq.name}.json")
+        pitch = (read_homographies(args.pitch_dir / f"{seq.name}.csv"), fit.length, fit.width)
+    out = render_dots(seq.video_path, tracks, args.out, speed=args.speed, background=args.background, width=args.width, radius=args.radius, trail=args.trail, label=f"{seq.name} {source}", max_frames=args.max_frames, pitch=pitch, view=args.view, lines=args.lines)
     print(f"wrote {out}")
     return 0
 
@@ -208,6 +289,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--iou", type=float, default=0.5, help="IoU needed for a CLEAR-MOT/IDF1 match (default: %(default)s)")
     p.add_argument("--no-hota", action="store_true", help="skip HOTA (about 15 s per sequence)")
     p.add_argument("--max-dist", type=float, default=None, metavar="PX", help="match box centres within PX pixels instead of IoU (CLEAR-MOT and IDF1; skips HOTA)")
+    p.add_argument("--max-dist-m", type=float, default=None, metavar="M", help="match box centres within M metres on the pitch instead (needs --pitch-dir; skips HOTA)")
+    p.add_argument("--pitch-dir", type=Path, default=None, help="the pitch command's output for these sequences (<sequence>.csv homographies)")
     p.add_argument("--jobs", type=int, default=None, help="worker processes (default: half the CPUs, at most one per sequence)")
     p.add_argument("--allow-missing", action="store_true", help="score a sequence without a prediction file as empty instead of failing")
     p.add_argument("--out", type=Path, default=None, help="also write the table as CSV (and the settings and per-threshold HOTA as JSON beside it)")
@@ -257,13 +340,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--box-source", choices=["track", "detection"], default="track", help="report Kalman-filtered track boxes or the matched raw detections (default: %(default)s)")
     p.set_defaults(func=cmd_track)
 
+    p = sub.add_parser("pitch", help="fit the image-to-pitch homography of every frame of TeamTrack videos (pixels to metres)")
+    p.add_argument("--teamtrack-root", type=Path, default=None, help="TeamTrack soccer_top root (default: <primary checkout>/videos/raw/teamtrack_soccer_top)")
+    p.add_argument("--split", nargs="+", choices=SPLITS, default=["test"], help="which splits' sequences (default: %(default)s)")
+    p.add_argument("--sequences", nargs="+", default=None, metavar="NAME", help="only these sequences")
+    p.add_argument("--out-dir", type=Path, required=True, help="writes <seq>.csv (one homography per frame), <seq>.json (frame 1's fit and a summary), overlays/<seq>.jpg and run.json")
+    p.add_argument("--length", type=float, default=PITCH_SIZE_M[0], help="pitch length in metres, to the lines' outer edges (default: %(default)s, measured on TeamTrack)")
+    p.add_argument("--width", type=float, default=PITCH_SIZE_M[1], help="pitch width in metres (default: %(default)s, measured on TeamTrack)")
+    p.add_argument("--max-frames", type=int, default=None, help="only the first N frames of each sequence")
+    p.add_argument("--jobs", type=int, default=4, help="sequences processed at once (default: %(default)s)")
+    p.set_defaults(func=cmd_pitch)
+
     p = sub.add_parser("dots", help="render a TeamTrack clip's players as dots (ground truth, or a tracks file), sped up")
     p.add_argument("--teamtrack-root", type=Path, default=None, help="TeamTrack soccer_top root (default: <primary checkout>/videos/raw/teamtrack_soccer_top)")
     p.add_argument("--sequence", required=True, help="sequence name, e.g. D_20220220_1_1530_1560")
     p.add_argument("--tracks", type=Path, default=None, help="a MOT tracks file; default: the sequence's ground truth, coloured by team. Tracks are coloured by team too when track --teams wrote teams/<seq>.csv beside them")
     p.add_argument("--out", type=Path, required=True, help="output .mp4 (H.264)")
     p.add_argument("--speed", type=int, default=4, help="keep every Nth frame at the source frame rate (default: %(default)s)")
-    p.add_argument("--background", choices=["median", "frame"], default="median", help="the clip's empty pitch (players erased) or the original frames (default: %(default)s)")
+    p.add_argument("--background", choices=["median", "frame", "pitch"], default="median", help="the clip's empty pitch (players erased), the original frames, or (pitch view) a drawn pitch (default: %(default)s)")
+    p.add_argument("--pitch-dir", type=Path, default=None, help="the pitch command's output for this sequence; needed for --view pitch, --background pitch and --lines")
+    p.add_argument("--view", choices=["image", "pitch"], default="image", help="as filmed, or straight down onto the pitch with the camera's motion removed (default: %(default)s)")
+    p.add_argument("--lines", action="store_true", help="draw the pitch markings where the homographies put them (a check of the fit)")
     p.add_argument("--width", type=int, default=1920, help="output width in pixels (default: %(default)s)")
     p.add_argument("--radius", type=int, default=7, help="dot radius in output pixels (default: %(default)s)")
     p.add_argument("--trail", type=int, default=0, help="draw each dot's last N output positions as a line (default: off)")
