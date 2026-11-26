@@ -36,8 +36,9 @@ These directives destroy work, break licences or publish secrets if ignored.
     See *Git, worktrees and pull requests*.
   - Never bypass signing (`--no-gpg-sign`, `-c commit.gpgsign=false`). If a local commit is truly
     needed, stop and ask the owner, who touches the key.
-  - No ruleset enforces signatures on this repository, so GitHub would merge an unsigned commit
-    without complaint. This rule is enforced here or not at all.
+  - Since 2026-11-24, the ruleset "Flock-This" (all branches) requires signed commits, blocks deletion
+    and force-pushes, and lets only bypass actors (admins and the owner) create or update branches.
+    GitHub-signed API commits satisfy it. Never use the bypass to land an unsigned commit.
 - **Dry-run every install into the `Flocker` conda environment.** On 2026-11-20, a routine
   `mamba install` silently swapped CUDA PyTorch for a CPU-only build to satisfy an unrelated
   constraint. `conda-meta/pinned` now holds `pytorch`, `libtorch` and `torchvision` to CUDA builds,
@@ -304,8 +305,10 @@ These apply to code in `src/`, `tests/`, `util/` and `bin/`.
   - The API cannot record executable bits or symlinks: every file lands as a regular `100644` file.
     The owner can add modes or symlinks with a signed local commit.
 - **Pull requests:** squash-merge, then delete the branch. The squash commit is signed by GitHub, so
-  `main` holds one verified commit per PR. The owner merges unless they have granted merge approval
-  for the session.
+  `main` holds one verified commit per PR.
+  - **The ruleset refuses a plain merge into `main`.** It needs the bypass: `gh pr merge N --squash
+    --delete-branch --admin`. Use it only under the owner's merge approval.
+  - The owner merges unless they have granted merge approval for the session.
 - **After an API-made PR merges, sync the checkout:** run `git fetch origin`, then
   `git reset --mixed origin/main`.
   - That moves `HEAD` and the index only. Files you wrote locally and committed through the API then
