@@ -14,6 +14,9 @@ Commands:
     pitch           fit the image-to-pitch homography of every frame of TeamTrack videos (pixels to metres)
     eval            score tracker output (a folder of <sequence>.txt MOT files) against TeamTrack ground truth
     dots            render ground truth or tracks as dots, as filmed or straight down onto the pitch, sped up
+    flock           per team and frame, the measures of collective motion (polarisation, milling, cohesion,
+                    neighbour distances) of the ground truth or of tracks, in pitch metres, optionally on a null model
+                    (every player from a different clip, or headings shuffled within a team)
 """
 
 import argparse
@@ -278,6 +281,76 @@ def cmd_dots(args: argparse.Namespace) -> int:
     return 0
 
 
+def _flock_kinematics(seq, args):
+    """One clip's outfield players with velocities, for flock: from the ground truth, or from tracks."""
+    import pandas as pd
+
+    from flocker.flocking import kinematics, players_from_gt, players_from_tracks
+    from flocker.mot import read_mot
+    from flocker.pitch import read_homographies, with_pitch_positions
+    from flocker.teamtrack import load_gt
+
+    if args.tracks_dir:
+        players = players_from_tracks(read_mot(args.tracks_dir / f"{seq.name}.txt"), pd.read_csv(args.tracks_dir / "teams" / f"{seq.name}.csv"))
+    else:
+        players = players_from_gt(load_gt(seq))
+    return kinematics(with_pitch_positions(players, read_homographies(args.pitch_dir / f"{seq.name}.csv")), fps=seq.seqinfo()["framerate"], window=args.window, max_step=args.max_step)
+
+
+def cmd_flock(args: argparse.Namespace) -> int:
+    import numpy as np
+    import pandas as pd
+
+    from flocker.flocking import draw_clips, frame_measures, mix_clips, shuffle_within
+    from flocker.teamtrack import list_sequences
+    from flocker.yolo_dataset import MISALIGNED_TRAIN
+
+    if args.window % 2 == 0 or args.window < 3:
+        print(f"flock: --window must be odd and at least 3, not {args.window}", file=sys.stderr)
+        return 2
+    if args.null == "mix" and args.tracks_dir:
+        print("flock: --null mix needs the ground truth: tracks have no ids that keep a player's role from clip to clip", file=sys.stderr)
+        return 2
+    usable = [s for s in list_sequences(args.teamtrack_root) if args.keep_misaligned or s.name not in MISALIGNED_TRAIN]
+    seqs = [s for s in usable if s.split in args.split]
+    if args.sequences:
+        seqs = [s for s in seqs if s.name in set(args.sequences)]
+    if not seqs:
+        print("flock: no sequences selected", file=sys.stderr)
+        return 2
+    pool = usable if args.null == "mix" else seqs  # --null mix draws every player from another clip, of any split
+    need = [(s.name, args.pitch_dir / f"{s.name}.csv") for s in pool] + ([(s.name, args.tracks_dir / f"{s.name}.txt") for s in seqs] + [(s.name, args.tracks_dir / "teams" / f"{s.name}.csv") for s in seqs] if args.tracks_dir else [])
+    missing = [str(path) for _, path in need if not path.is_file()]
+    if missing:
+        print(f"flock: {len(missing)} input file(s) missing, e.g. {missing[0]}", file=sys.stderr)
+        return 2
+    rng = np.random.default_rng(args.seed)
+    clips = {s.name: _flock_kinematics(s, args) for s in pool} if args.null == "mix" else {}
+    tables, summary = [], {}
+    for s in seqs:
+        kin = clips[s.name] if clips else _flock_kinematics(s, args)
+        if args.null == "mix":
+            ids = sorted(kin["id"].unique())
+            if len(clips) - 1 < len(ids):
+                print(f"flock: --null mix needs {len(ids) + 1} clips or more to draw from, not {len(clips)}", file=sys.stderr)
+                return 2
+            kin = mix_clips(clips, dict(zip(ids, draw_clips(list(clips), len(ids), rng, exclude=[s.name]))))
+        elif args.null == "shuffle":
+            kin = shuffle_within(kin, rng)
+        table = frame_measures(kin, min_speed=args.min_speed)
+        tables.append(table.assign(sequence=s.name))
+        summary[s.name] = {"rows": int(len(kin)), "rows_with_velocity": int(kin["vx"].notna().sum()), "runs": int(kin.groupby("id")["run"].nunique().sum()), "frames": int(table["frame"].nunique()), "polarisation_median": {g: float(table.loc[table["group"] == g, "polarisation"].median()) for g in ("0", "1", "both")}}
+        print(f"{s.name}: {len(kin)} player rows, {summary[s.name]['rows_with_velocity']} with a velocity, {summary[s.name]['runs']} runs; median polarisation " + ", ".join(f"{g} {v:.3f}" for g, v in summary[s.name]["polarisation_median"].items()), flush=True)
+    out = pd.concat(tables, ignore_index=True)
+    out = out[["sequence"] + [c for c in out.columns if c != "sequence"]]
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    out.to_csv(args.out_dir / "frames.csv", index=False, float_format="%.6g")
+    settings = {"source": str(args.tracks_dir) if args.tracks_dir else "ground truth", "pitch_dir": str(args.pitch_dir), "splits": args.split, "window_frames": args.window, "max_step_m": args.max_step, "min_speed_ms": args.min_speed, "null": args.null, "seed": args.seed, "keep_misaligned": args.keep_misaligned, "mix_pool": len(clips) or None}
+    (args.out_dir / "run.json").write_text(json.dumps({"settings": settings, "sequences": summary}, indent=1))
+    print(f"wrote {args.out_dir / 'frames.csv'} ({len(out)} rows: {len(seqs)} sequences x frames x groups 0, 1 and both) and {args.out_dir / 'run.json'}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="flocker", description="Flocker: flocking behaviour in tracked video. Commands below; '<command> --help' for each.")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -366,6 +439,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--trail", type=int, default=0, help="draw each dot's last N output positions as a line (default: off)")
     p.add_argument("--max-frames", type=int, default=None)
     p.set_defaults(func=cmd_dots)
+
+    p = sub.add_parser("flock", help="per team and frame, measures of collective motion in pitch metres (ground truth or tracks), optionally on a null model")
+    p.add_argument("--teamtrack-root", type=Path, default=None, help="TeamTrack soccer_top root (default: <primary checkout>/videos/raw/teamtrack_soccer_top)")
+    p.add_argument("--split", nargs="+", choices=SPLITS, default=["test"], help="which splits' sequences (default: %(default)s)")
+    p.add_argument("--sequences", nargs="+", default=None, metavar="NAME", help="only these sequences")
+    p.add_argument("--keep-misaligned", action="store_true", help="also use the six train sequences whose labels drift (see flocker.yolo_dataset)")
+    p.add_argument("--pitch-dir", type=Path, required=True, help="the pitch command's output for these sequences (<sequence>.csv homographies)")
+    p.add_argument("--tracks-dir", type=Path, default=None, help="tracks written by track --teams (<sequence>.txt and teams/<sequence>.csv) instead of the ground truth; team -1 tracks (goalkeepers) are left out, as ground-truth ids 0 and 13 are")
+    p.add_argument("--out-dir", type=Path, required=True, help="writes frames.csv (one row per sequence, frame and group: team 0, team 1, both) and run.json")
+    p.add_argument("--min-speed", type=float, default=0.5, help="m/s; a slower player has no heading (default: %(default)s)")
+    p.add_argument("--max-step", type=float, default=0.4, help="m per frame; a longer step cuts a track in two, as a glitch (default: %(default)s, 12 m/s)")
+    p.add_argument("--window", type=int, default=15, help="Savitzky-Golay window in frames, odd (default: %(default)s, 0.5 s)")
+    p.add_argument("--null", choices=["none", "mix", "shuffle"], default="none", help="measure a null model instead: every player's whole track from a different clip, drawn from all usable clips (mix; ground truth only), or velocities swapped among a team's players within each frame (shuffle) (default: %(default)s)")
+    p.add_argument("--seed", type=int, default=0, help="random seed for the null models (default: %(default)s)")
+    p.set_defaults(func=cmd_flock)
     return ap
 
 
