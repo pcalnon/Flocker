@@ -136,6 +136,12 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
     annotated. Six train sequences (`0570_0600` to `0720_0750`) have labels that drift ahead of the
     video, and are left out of training. `tests/test_teamtrack.py` pins these facts, and
     `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` shows the evidence.
+  - Ids 0 and 13 are the goalkeepers, except in `0570_0600` and `0600_0630` (two of the drifting six), where they
+    play in midfield. Team 0 defends the left goal and team 1 the right, throughout the clips.
+  - The ground truth has glitches: 229 one-frame steps faster than 12 m/s, mostly in the 15 early clips whose boxes
+    are a fixed 39 px, and permanent jumps of up to 24 m. Never difference raw positions:
+    `flocker.flocking.kinematics` cuts tracks at steps over 0.4 m per frame and smooths before differencing.
+    `notes/FLOCKER_2026-11-25_FLOCKING-ANALYSIS.md` lists them, and `tests/test_flocking.py` pins the goalkeepers.
   - The pitch is a regulation 105 x 68 m, at about 27.9 image pixels per metre (15 px is about 0.54 m).
     The drone yaws and drifts within every clip, so a pitch corner moves tens of pixels: use a homography per
     frame (the `pitch` command), never one per clip. `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md` has the
@@ -159,7 +165,12 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
      with `--pitch-dir` matches centres in metres on the pitch;
   6. `dots`: draw ground truth or tracks as dots, on the clip's empty pitch or on the frames, at N x
      speed. With `--pitch-dir`, `--view pitch` looks straight down onto the pitch with the camera's
-     motion removed, and `--lines` draws the fitted markings. These are the owner's edits 2, 4 and 5.
+     motion removed, and `--lines` draws the fitted markings. These are the owner's edits 2, 4 and 5;
+  7. `flock`: per team and frame, the measures of collective motion in metres (polarisation, milling,
+     cohesion, nearest-neighbour distances), from the ground truth (goalkeepers left out) or from `track
+     --teams` output (`--tracks-dir`), optionally on a null model: `--null mix` takes every player from a
+     different clip (ground truth; ids keep their roles from clip to clip), `--null shuffle` deals headings
+     at random within a team. The measures are in `flocker.flocking`.
 - **Pass explicit output paths** under `videos/analyze/` or `tmp/`. Ultralytics' own defaults are
   relative to the working directory, and its host-level `datasets_dir` points into another
   repository.
@@ -167,7 +178,8 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
   settings already fixed, so test results stay unbiased.
 - **Results go in `notes/`**, with the commands that produced them:
   `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md`,
-  `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md` and `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md` so far.
+  `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md`, `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md` and
+  `notes/FLOCKER_2026-11-25_FLOCKING-ANALYSIS.md` so far.
 
 ## Launching sessions
 

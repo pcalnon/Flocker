@@ -30,15 +30,23 @@ The video work is organised as five edits:
   - The pitch measures a regulation 105 x 68 m.
   - The drone turns and drifts within each 30 s clip, so the homography is followed frame by frame.
   - The dots can be drawn straight down onto the pitch, with the camera's motion removed.
+- **The teams move as flocks** (first pass, ground truth and tracks agree):
+  - **Alignment:** each team's players are aligned far beyond what the same players taken from different moments
+    would give (polarisation 0.70 against 0.29, the level of random headings).
+  - **One flock:** the two teams move together, and both follow the ball about a second behind.
+  - **Cohesion and spacing:** each team keeps a compact block, with even spacing inside it, and marks its opponents.
+  - **A topological range:** a player aligns with their nearest 4-5 teammates however far apart the team is, as
+    starlings do.
 - **Not done yet:**
   - edit 3, scaling movement;
   - edit 1, removing shadows on the stock clips;
-  - the flocking analysis itself.
+  - separating player-to-player interaction from the ball's common pull.
 
 Results and how they were obtained:
 - `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md`: the harness and the detector;
 - `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md`: identity and team labels;
-- `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md`: the homography, positions and speeds in metres.
+- `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md`: the homography, positions and speeds in metres;
+- `notes/FLOCKER_2026-11-25_FLOCKING-ANALYSIS.md`: the flocking measures, their null models, the ball and the tracks.
 
 ## Quick start
 
@@ -47,12 +55,13 @@ needs no installation:
 
 ```bash
 P="conda run -n Flocker python bin/flocker.py"
-$P --help                                         # build-dataset, train, track, pitch, eval, dots
+$P --help                                         # build-dataset, train, track, pitch, eval, dots, flock
 $P dots --sequence D_20220220_1_1530_1560 --out videos/edit/gt_dots_4x.mp4 --speed 4   # videos/edit/ is gitignored
 $P track --model <weights> --split test --out-dir <folder> --teams   # tracks, plus each track's team
 $P pitch --split test --out-dir <folder>             # a homography per frame: <sequence>.csv, pixels to metres
 $P eval --pred-dir <folder of <sequence>.txt MOT files> --split test
 $P dots --sequence D_20220220_1_1530_1560 --pitch-dir <folder> --view pitch --out videos/edit/gt_pitch_4x.mp4
+$P flock --split test --pitch-dir <folder> --out-dir <folder>   # per team and frame: polarisation, cohesion, ...
 conda run -n Flocker python -m pytest -q -m unit # fast tests; plain `pytest -q` adds the real-data ones
 ```
 
