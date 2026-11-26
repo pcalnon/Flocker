@@ -17,6 +17,11 @@ Facts checked on 2026-11-24 against all 60 sequences (notes/FLOCKER_2026-11-24_T
 every sequence has the 23 ids 0..22; ids 0-10 are one team, 11-21 the other and 22 is the ball (matched to the
 CSV's TeamID columns); referees and staff are not annotated. Six train sequences (0570_0600 to 0720_0750) carry
 ground truth for frames 901-906, past their 900-frame videos, so load_gt() clips to seqlength by default.
+
+The pitch (2026-11-25, notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md): fitted to frame 1 of every sequence with its
+size free, it measures 105.018 +- 0.002 m by 67.955 +- 0.002 m to the lines' outer edges (a regulation 105 x 68 m
+field), at about 27.9 image pixels per metre in the middle. The drone turns by up to about 5 degrees within a clip, so
+positions need a homography per frame (flocker.pitch.track_pitch), not one per clip.
 """
 
 import configparser
@@ -32,6 +37,11 @@ from flocker.paths import teamtrack_root
 SPLITS = ("train", "val", "test")
 BALL_ID = 22
 TEAM_SIZE = 11
+PITCH_SIZE_M = (105.01, 67.96)  # length and width, measured (above)
+# The pitch's outer corners (top-left, top-right, bottom-right, bottom-left) in the 3840 x 2160 frame, read by eye off the
+# median background of D_20220220_1_1260_1290 to within a few pixels. They only start flocker.pitch.fit_pitch, which
+# converges to the same homography from corners 20 px away (tests/test_pitch.py).
+PITCH_CORNERS_PX = ((441.0, 143.0), (3391.0, 83.0), (3400.0, 2006.0), (478.0, 2022.0))
 
 
 def team_of(ids) -> np.ndarray:

@@ -4,7 +4,7 @@
 real-world applications. The first case study tracks soccer players in top-down drone video.
 **Repository**: `pcalnon/Flocker` (**public**); local checkout `~/Development/python/Flocker`
 **Author**: Paul Calnon
-**Last Updated**: 2026-11-24
+**Last Updated**: 2026-11-25
 
 ---
 
@@ -135,6 +135,10 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
     annotated. Six train sequences (`0570_0600` to `0720_0750`) have labels that drift ahead of the
     video, and are left out of training. `tests/test_teamtrack.py` pins these facts, and
     `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` shows the evidence.
+  - The pitch is a regulation 105 x 68 m, at about 27.9 image pixels per metre (15 px is about 0.54 m).
+    The drone yaws and drifts within every clip, so a pitch corner moves tens of pixels: use a homography per
+    frame (the `pitch` command), never one per clip. `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md` has the
+    evidence, and `tests/test_pitch.py` pins it.
 
 ## Analysis pipeline
 
@@ -147,17 +151,22 @@ Git does not track empty directories; `.gitkeep` files keep the empty ones in a 
      second NMS, `--dedup-iou 0.3`) and run one tracker per class, with the tuned ByteTrack settings
      (`--tracker flocker`). `--teams` labels each player track's team from kit colour. Ultralytics'
      own tracker defaults break player identities here: see `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md`;
-  4. `eval`: HOTA, CLEAR-MOT and IDF1 against the ground truth, players and ball apart;
-  5. `dots`: draw ground truth or tracks as dots, on the clip's empty pitch or on the frames, at N x
-     speed. These are the owner's edits 2 and 5.
+  4. `pitch`: fit the image-to-pitch homography of every frame, pixels to metres, from the painted lines.
+     It writes `<seq>.csv` (one homography per frame) and `<seq>.json`; `flocker.pitch.with_pitch_positions`
+     turns boxes into pitch metres with them. This is the owner's edit 4;
+  5. `eval`: HOTA, CLEAR-MOT and IDF1 against the ground truth, players and ball apart. `--max-dist-m`
+     with `--pitch-dir` matches centres in metres on the pitch;
+  6. `dots`: draw ground truth or tracks as dots, on the clip's empty pitch or on the frames, at N x
+     speed. With `--pitch-dir`, `--view pitch` looks straight down onto the pitch with the camera's
+     motion removed, and `--lines` draws the fitted markings. These are the owner's edits 2, 4 and 5.
 - **Pass explicit output paths** under `videos/analyze/` or `tmp/`. Ultralytics' own defaults are
   relative to the working directory, and its host-level `datasets_dir` points into another
   repository.
 - **Tune on val, score test once.** Choose settings on the val split. Score the test split only with
   settings already fixed, so test results stay unbiased.
 - **Results go in `notes/`**, with the commands that produced them:
-  `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` and
-  `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md` so far.
+  `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md`,
+  `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md` and `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md` so far.
 
 ## Launching sessions
 

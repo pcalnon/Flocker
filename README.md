@@ -25,14 +25,20 @@ The video work is organised as five edits:
 - **Each player's team comes from kit colour,** with goalkeepers kept apart; 98.9 % of the test split's tracked
   outfield positions carry the right team.
 - **Players can be redrawn as dots** on the clip's empty pitch (edit 2), at N x speed (edit 5), coloured by team.
+- **Positions are in metres, and the camera angle is corrected (edit 4).**
+  - Every frame has its own image-to-pitch homography, fitted to the painted lines to about 0.4 px (1.4 cm).
+  - The pitch measures a regulation 105 x 68 m.
+  - The drone turns and drifts within each 30 s clip, so the homography is followed frame by frame.
+  - The dots can be drawn straight down onto the pitch, with the camera's motion removed.
 - **Not done yet:**
-  - edit 4, correcting the camera angle with a homography;
   - edit 3, scaling movement;
   - edit 1, removing shadows on the stock clips;
   - the flocking analysis itself.
 
-Results and how they were obtained: `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md` (the harness and the
-detector) and `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md` (identity and team labels).
+Results and how they were obtained:
+- `notes/FLOCKER_2026-11-24_TEAMTRACK-EVALUATION-HARNESS.md`: the harness and the detector;
+- `notes/FLOCKER_2026-11-24_PLAYER-IDENTITY.md`: identity and team labels;
+- `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md`: the homography, positions and speeds in metres.
 
 ## Quick start
 
@@ -41,10 +47,12 @@ needs no installation:
 
 ```bash
 P="conda run -n Flocker python bin/flocker.py"
-$P --help                                         # build-dataset, train, track, eval, dots
+$P --help                                         # build-dataset, train, track, pitch, eval, dots
 $P dots --sequence D_20220220_1_1530_1560 --out videos/edit/gt_dots_4x.mp4 --speed 4   # videos/edit/ is gitignored
 $P track --model <weights> --split test --out-dir <folder> --teams   # tracks, plus each track's team
+$P pitch --split test --out-dir <folder>             # a homography per frame: <sequence>.csv, pixels to metres
 $P eval --pred-dir <folder of <sequence>.txt MOT files> --split test
+$P dots --sequence D_20220220_1_1530_1560 --pitch-dir <folder> --view pitch --out videos/edit/gt_pitch_4x.mp4
 conda run -n Flocker python -m pytest -q -m unit # fast tests; plain `pytest -q` adds the real-data ones
 ```
 

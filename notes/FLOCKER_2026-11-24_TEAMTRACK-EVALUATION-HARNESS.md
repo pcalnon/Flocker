@@ -27,6 +27,9 @@ detections, tracks and metric tables
   - **identity is the weak point:** 773 track ids for 198 players.
 - **Six train sequences have labels that drift in time**, and are left out of training.
 - **The camera barely moves**: at most about 12 px across the whole match. One homography could serve every clip.
+  - *Corrected 2026-11-25:* phase correlation measures translation only. The drone also turns, by up to about 5°
+    within a 30 s clip, and a pitch corner moves up to about 80 px. One homography per clip would misplace positions by
+    up to about 3 m. `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md` follows the pitch frame by frame.
 
 ## Tools added
 
@@ -97,6 +100,11 @@ These were checked against all 60 sequences. `tests/test_teamtrack.py` pins them
   - across the match, each clip's frame 1 is within about 12 px of the first clip's.
 
   At about 37 px per metre, that is about 0.3 m, so one image-to-pitch homography could serve every clip.
+
+  *Corrected 2026-11-25* (`notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md`):
+  - the scale is 27.9 px per metre, not 37, so 12 px is about 0.43 m;
+  - the camera also rotates, which phase correlation cannot see: a corner moves up to about 80 px within a clip;
+  - so the homography is fitted to every frame.
 
 ## The evaluation harness (`src/flocker/evaluate.py`)
 
@@ -265,7 +273,8 @@ split took 8.4 min, tracking included.
   - try team-colour-aware association;
   - try a larger detector.
 - **The ball:** a dedicated detector and tracker.
-- **The camera angle (edit 4):** a homography, which would also put the 15 px threshold in metres.
+- **The camera angle (edit 4):** a homography, which would also put the 15 px threshold in metres. *Done 2026-11-25:*
+  `notes/FLOCKER_2026-11-25_PITCH-HOMOGRAPHY.md`; 15 px is 0.52-0.55 m.
 
 ## Reproduce
 
